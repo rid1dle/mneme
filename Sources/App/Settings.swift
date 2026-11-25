@@ -1,0 +1,401 @@
+import AppKit
+import ServiceManagement
+import SwiftUI
+import UniformTypeIdentifiers
+
+/// What the Settings window reads and changes. Store writes go through the store queue.
+@MainActor
+final class SettingsModel: ObservableObject {
+    @Published var shortcuts: Shortcuts
+    @Published var problems: [ShortcutAction: String] = [:]
+    @Published var pinboards: [Pinboard] = []
+    @Published var accessibility = AXIsProcessTrusted()
+    @Published var clipboardAllowed = Watcher.accessAllowed()
+    @Published var openAtLogin = SMAppService.mainApp.status == .enabled
+    @Published var excluded: [String]
+    @AppStorage(Pref.historyDays) var historyDays = 30
+    @AppStorage(Pref.autoPaste) var autoPaste = true
+    @AppStorage(Pref.linkPreviews) var linkPreviews = true
+    @AppStorage(Pref.showMenuBar) var showMenuBar = true
+
+    let store: Store
+    let storeQueue: DispatchQueue
+    weak var app: AppDelegate?
+
+    init(app: AppDelegate) {
+        self.app = app
+        store = app.store
+        storeQueue = app.storeQueue
+        shortcuts = app.shortcuts
+        excluded = UserDefaults.standard.stringArray(forKey: Pref.excluded) ?? CaptureRules.defaultExcluded.sorted()
+        reloadPinboards()
+    }
+
+    func refreshPermissions() {
+        accessibility = AXIsProcessTrusted()
+        clipboardAllowed = Watcher.accessAllowed()
+        openAtLogin = SMAppService.mainApp.status == .enabled
+    }
+
+    // MARK: shortcuts
+
+    func set(_ action: ShortcutAction, _ combo: KeyCombo?) {
+        problems[action] = nil
+        if let combo, let p = shortcuts.problem(combo, for: action) { problems[action] = p.message; return }
+        guard app?.setShortcut(action, combo) == true else {
+            problems[action] = "Another app already uses \(combo?.display ?? "this shortcut")"
+            return
+        }
+        shortcuts = app?.shortcuts ?? shortcuts
+    }
+
+    func suspendHotkeys(_ on: Bool) { app?.suspendHotkeys(on) }
+
+    // MARK: general
+
+    func setOpenAtLogin(_ on: Bool) {
+        do { if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() } } catch {}
+        openAtLogin = SMAppService.mainApp.status == .enabled
+    }
+
+    var kinds: Set<ItemKind> {
+        get { Set((UserDefaults.standard.stringArray(forKey: Pref.kinds) ?? ItemKind.allCases.map(\.rawValue)).compactMap(ItemKind.init(rawValue:))) }
+        set { objectWillChange.send(); UserDefaults.standard.set(ItemKind.allCases.filter(newValue.contains).map(\.rawValue), forKey: Pref.kinds) }
+    }
+
+    func setExcluded(_ ids: [String]) {
+        excluded = ids
+        UserDefaults.standard.set(ids, forKey: Pref.excluded)
+    }
+
+    func addExcludedApp() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.applicationBundle]
+        panel.directoryURL = URL(fileURLWithPath: "/Applications")
+        panel.prompt = "Exclude"
+        guard panel.runModal() == .OK else { return }
+        let ids = panel.urls.compactMap { Bundle(url: $0)?.bundleIdentifier }
+        setExcluded(Array(Set(excluded + ids)).sorted())
+    }
+
+    func clearHistory() {
+        storeQueue.async { [store] in try? store.clearHistory(now: Date()) }
+    }
+
+    // MARK: pinboards
+
+    func reloadPinboards() {
+        storeQueue.async { [store] in
+            let boards = (try? store.allPinboards()) ?? []
+            DispatchQueue.main.async { MainActor.assumeIsolated { self.pinboards = boards } }
+        }
+    }
+
+    func editPinboards(_ body: @escaping @Sendable (Store) throws -> Void) {
+        storeQueue.async { [store] in
+            try? body(store)
+            let boards = (try? store.allPinboards()) ?? []
+            DispatchQueue.main.async { MainActor.assumeIsolated { self.pinboards = boards } }
+        }
+    }
+}
+
+struct SettingsView: View {
+    @ObservedObject var settings: SettingsModel
+    @EnvironmentObject var theme: ThemeStore
+    @State var tab: String
+
+    private static let tabs: [(id: String, name: String, icon: String)] = [
+        ("general", "General", "gearshape"), ("shortcuts", "Shortcuts", "command"), ("history", "History", "clock"),
+        ("privacy", "Privacy", "hand.raised"), ("appearance", "Appearance", "paintpalette"), ("pinboards", "Pinboards", "pin"),
+    ]
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 2) {
+                ForEach(Self.tabs, id: \.id) { t in
+                    Button { tab = t.id } label: {
+                        VStack(spacing: 3) {
+                            Image(systemName: t.icon).font(.system(size: 17)).frame(height: 20)
+                            Text(t.name).font(.system(size: 11))
+                        }
+                        .frame(width: 84, height: 48)
+                        .foregroundStyle(tab == t.id ? theme.accent : Color.secondary)
+                        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(tab == t.id ? Color.primary.opacity(0.08) : .clear))
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(t.name)
+                    .accessibilityAddTraits(tab == t.id ? .isSelected : [])
+                }
+            }
+            .padding(.vertical, 8)
+            Divider()
+            Group {
+                switch tab {
+                case "shortcuts": ShortcutsTab(settings: settings)
+                case "history": HistoryTab(settings: settings)
+                case "privacy": PrivacyTab(settings: settings)
+                case "appearance": AppearanceTab()
+                case "pinboards": PinboardsTab(settings: settings)
+                default: GeneralTab(settings: settings)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .frame(width: 620, height: 560)
+        .tint(theme.accent)
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in settings.refreshPermissions() }
+    }
+}
+
+private struct StatusRow: View {
+    let title: String
+    let ok: Bool
+    let okText: String
+    let fixText: String
+    let detail: String
+    let fix: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top) {
+            Image(systemName: ok ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+                .foregroundStyle(ok ? .green : .orange).font(.system(size: 15))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.system(size: 13, weight: .medium))
+                Text(ok ? okText : detail).font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer()
+            if !ok { Button(fixText, action: fix) }
+        }
+    }
+}
+
+struct GeneralTab: View {
+    @ObservedObject var settings: SettingsModel
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle("Open Mneme at login", isOn: Binding(get: { settings.openAtLogin }, set: { settings.setOpenAtLogin($0) }))
+                Toggle("Show Mneme in the menu bar", isOn: $settings.showMenuBar)
+                    .onChange(of: settings.showMenuBar) { settings.app?.applyMenuBar() }
+                if !settings.showMenuBar {
+                    Text("To get back here, open Mneme again from Applications, or use the gear in the shelf.").font(.system(size: 11)).foregroundStyle(.secondary)
+                }
+                Toggle("Paste into the app I was in (not only copy)", isOn: $settings.autoPaste)
+            }
+            Section("Permissions") {
+                StatusRow(title: "Clipboard access", ok: settings.clipboardAllowed, okText: "Mneme can save what you copy.",
+                          fixText: "Open Settings", detail: "Set Mneme to Always Allow in Paste from Other Apps, or nothing is saved.") {
+                    NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Pasteboard")!)
+                }
+                StatusRow(title: "Accessibility", ok: settings.accessibility, okText: "Mneme can press ⌘V for you and run the paste stack.",
+                          fixText: "Open Settings", detail: "Needed to paste for you and for ⌘V in the paste stack. Without it, items are copied and you press ⌘V.") {
+                    NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
+                }
+            }
+        }
+        .formStyle(.grouped)
+    }
+}
+
+struct ShortcutsTab: View {
+    @ObservedObject var settings: SettingsModel
+
+    var body: some View {
+        Form {
+            Section("Anywhere") {
+                ForEach(ShortcutAction.allCases.filter(\.isGlobal), id: \.self) { row($0) }
+            }
+            Section("In the shelf") {
+                ForEach(ShortcutAction.allCases.filter { !$0.isGlobal }, id: \.self) { row($0) }
+                Text("Fixed: ← → move, Return pastes, ⌘1 to ⌘9 paste one of the first nine, Esc closes. Shortcuts without ⌘, ⌃ or ⌥ type into the search while it has text.")
+                    .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    private func row(_ a: ShortcutAction) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack {
+                Text(a.title)
+                Spacer()
+                HotkeyRecorder(action: a, settings: settings)
+            }
+            if let note = a.note { Text(note).font(.system(size: 11)).foregroundStyle(.secondary) }
+            if let p = settings.problems[a] { Text(p).font(.system(size: 11, weight: .medium)).foregroundStyle(.red) }
+        }
+    }
+}
+
+struct HistoryTab: View {
+    @ObservedObject var settings: SettingsModel
+    @State private var confirmClear = false
+    private let ages: [(String, Int)] = [("1 day", 1), ("1 week", 7), ("1 month", 30), ("3 months", 90), ("1 year", 365), ("Forever", 0)]
+    private let kindNames: [(ItemKind, String)] = [(.text, "Text"), (.richText, "Rich text"), (.image, "Images"), (.file, "Files"), (.link, "Links"), (.color, "Colors")]
+
+    var body: some View {
+        Form {
+            Section {
+                Picker("Keep history for", selection: $settings.historyDays) {
+                    ForEach(ages, id: \.1) { Text($0.0).tag($0.1) }
+                }
+                Text("Pinboards are kept forever, whatever this says.").font(.system(size: 11)).foregroundStyle(.secondary)
+            }
+            Section("Save") {
+                ForEach(kindNames, id: \.0) { kind, name in
+                    Toggle(name, isOn: Binding(get: { settings.kinds.contains(kind) },
+                                               set: { on in var k = settings.kinds; if on { k.insert(kind) } else { k.remove(kind) }; settings.kinds = k }))
+                }
+            }
+            Section {
+                Button("Clear History…", role: .destructive) { confirmClear = true }
+                    .confirmationDialog("Clear all of History?", isPresented: $confirmClear) {
+                        Button("Clear History", role: .destructive) { settings.clearHistory() }
+                    } message: { Text("Items on pinboards stay on their pinboards.") }
+            }
+        }
+        .formStyle(.grouped)
+    }
+}
+
+struct PrivacyTab: View {
+    @ObservedObject var settings: SettingsModel
+    static let knownNames = ["com.1password.1password": "1Password", "com.agilebits.onepassword7": "1Password 7",
+                             "com.apple.keychainaccess": "Keychain Access", "com.apple.Passwords": "Passwords"]
+
+    var body: some View {
+        Form {
+            Section {
+                Label("Passwords and other secrets that password managers mark are never saved.", systemImage: "lock.shield")
+                    .font(.system(size: 12))
+            }
+            Section("Never save what I copy in") {
+                ForEach(settings.excluded, id: \.self) { id in
+                    HStack {
+                        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: id) {
+                            Image(nsImage: NSWorkspace.shared.icon(forFile: url.path)).resizable().frame(width: 18, height: 18)
+                            Text(FileManager.default.displayName(atPath: url.path).replacingOccurrences(of: ".app", with: ""))
+                        } else {
+                            Image(systemName: "app.dashed").frame(width: 18)
+                            Text(Self.knownNames[id] ?? id)
+                            Text("not installed").font(.system(size: 11)).foregroundStyle(.tertiary)
+                        }
+                        Spacer()
+                        Button { settings.setExcluded(settings.excluded.filter { $0 != id }) } label: { Image(systemName: "minus.circle") }
+                            .buttonStyle(.borderless)
+                    }
+                }
+                Button("Add App…") { settings.addExcludedApp() }
+            }
+            Section {
+                Toggle("Show page titles and images for copied links", isOn: $settings.linkPreviews)
+                Text("Mneme reads only the start of the page. This is its only use of the network.").font(.system(size: 11)).foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+    }
+}
+
+struct AppearanceTab: View {
+    @EnvironmentObject var theme: ThemeStore
+
+    var body: some View {
+        Form {
+            Section("Themes") {
+                HStack(spacing: 12) {
+                    ForEach(themePresets, id: \.name) { p in
+                        Button { theme.theme = p.theme } label: {
+                            VStack(spacing: 6) {
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .fill(p.theme.appearance == .dark ? Color(white: 0.15) : p.theme.appearance == .light ? Color(white: 0.96) : Color(white: 0.55))
+                                    .overlay(Circle().fill(Color(hex: p.theme.accent)).frame(width: 18, height: 18))
+                                    .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                        .strokeBorder(theme.theme == p.theme ? Color(hex: p.theme.accent) : Color.primary.opacity(0.15), lineWidth: theme.theme == p.theme ? 3 : 1))
+                                    .frame(width: 96, height: 60)
+                                Text(p.name).font(.system(size: 12))
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            Section {
+                Picker("Appearance", selection: $theme.theme.appearance) {
+                    Text("Match the system").tag(Appearance.system)
+                    Text("Light").tag(Appearance.light)
+                    Text("Dark").tag(Appearance.dark)
+                }
+                ColorPicker("Accent colour", selection: Binding(get: { Color(hex: theme.theme.accent) }, set: { c in
+                    if let hex = NSColor(c).usingColorSpace(.sRGB).map({ String(format: "#%02X%02X%02X", Int(($0.redComponent * 255).rounded()), Int(($0.greenComponent * 255).rounded()), Int(($0.blueComponent * 255).rounded())) }) {
+                        theme.theme.accent = hex
+                    }
+                }), supportsOpacity: false)
+                Picker("Shelf", selection: $theme.theme.shelf) {
+                    Text("Glass").tag(ShelfStyle.glass)
+                    Text("Solid").tag(ShelfStyle.solid)
+                }
+                .pickerStyle(.segmented)
+                Picker("Card size", selection: $theme.theme.cardSize) {
+                    Text("Small").tag(CardSize.small)
+                    Text("Medium").tag(CardSize.medium)
+                    Text("Large").tag(CardSize.large)
+                }
+                .pickerStyle(.segmented)
+            }
+        }
+        .formStyle(.grouped)
+    }
+}
+
+struct PinboardsTab: View {
+    @ObservedObject var settings: SettingsModel
+    @State private var deleting: Pinboard?
+
+    var body: some View {
+        Form {
+            Section {
+                ForEach(Array(settings.pinboards.enumerated()), id: \.element.id) { n, board in
+                    HStack(spacing: 10) {
+                        Menu {
+                            ForEach(ShelfModel.pinboardColors, id: \.self) { c in
+                                Button { settings.editPinboards { try $0.recolorPinboard(board.id, color: c, now: Date()) } } label: {
+                                    Label(c, systemImage: "circle.fill")
+                                }
+                            }
+                        } label: { Circle().fill(Color(hex: board.color)).frame(width: 14, height: 14) }
+                            .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+                            .accessibilityLabel("Colour")
+                        TextField("", text: Binding(get: { board.name }, set: { name in
+                            settings.editPinboards { try $0.renamePinboard(board.id, name: name, now: Date()) }
+                        }), prompt: Text("Name"))
+                        .labelsHidden()
+                        .textFieldStyle(.plain)
+                        .multilineTextAlignment(.leading)
+                        Spacer()
+                        Button { settings.editPinboards { try $0.movePinboard(board.id, to: n - 1) } } label: { Image(systemName: "chevron.up") }
+                            .buttonStyle(.borderless).disabled(n == 0)
+                        Button { settings.editPinboards { try $0.movePinboard(board.id, to: n + 1) } } label: { Image(systemName: "chevron.down") }
+                            .buttonStyle(.borderless).disabled(n == settings.pinboards.count - 1)
+                        Button { deleting = board } label: { Image(systemName: "trash") }.buttonStyle(.borderless)
+                    }
+                }
+                if settings.pinboards.isEmpty {
+                    Text("No pinboards yet.").foregroundStyle(.secondary)
+                }
+                Button("New Pinboard") {
+                    let color = ShelfModel.pinboardColors[settings.pinboards.count % ShelfModel.pinboardColors.count]
+                    settings.editPinboards { _ = try $0.createPinboard(name: "New pinboard", color: color, now: Date()) }
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .confirmationDialog("Delete “\(deleting?.name ?? "")”?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } })) {
+            Button("Delete Pinboard", role: .destructive) {
+                if let id = deleting?.id { settings.editPinboards { try $0.deletePinboard(id, now: Date()) } }
+            }
+        } message: { Text("Its items stay in History if they are there; the rest are deleted.") }
+    }
+}

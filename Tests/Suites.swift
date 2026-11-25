@@ -1,0 +1,1 @@
+let suites: [(String, [TestCase])] = [("Store", storeTests), ("Capture", captureTests), ("Lifecycle", lifecycleTests), ("Query", queryTests), ("StackTheme", stackThemeTests), ("AppBridge", appBridgeTests), ("Format", formatTests), ("CharCount", charCountTests), ("Shortcuts", shortcutTests), ("Background", backgroundTests), ("ReviewFixes", reviewFixTests)]
