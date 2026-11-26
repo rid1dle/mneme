@@ -9,10 +9,19 @@ enum Pref {
     static let autoPaste = "autoPaste"          // Bool, true
     static let showMenuBar = "showMenuBar"      // Bool, true
     static let didSetUp = "didSetUp"            // Bool
+    static let soundOnCopy = "soundOnCopy"      // Bool, true: a sound when a copy is saved
+    static let soundOnPaste = "soundOnPaste"    // Bool, true: a sound when Mneme pastes
+    static let sound = "sound"                  // String, the copy sound: a MadeSound raw value or "system:<name>"
+    static let pasteSound = "pasteSound"        // String, the paste sound, same values
+    static let soundLevel = "soundLevel"        // Double 0...1, 0.4
+    static let soundSteady = "soundSteady"      // Bool, true: the same loudness whatever the Mac's volume
+    static let defaultSound = MadeSound.drop.rawValue
+    static let defaultPasteSound = MadeSound.pluck.rawValue
     // Shortcuts live under Shortcuts.key.
 
     static func register(_ d: UserDefaults = .standard) {
-        d.register(defaults: [historyDays: 30, linkPreviews: true, autoPaste: true, showMenuBar: true])
+        d.register(defaults: [historyDays: 30, linkPreviews: true, autoPaste: true, showMenuBar: true,
+                                 soundOnCopy: true, soundOnPaste: true, sound: defaultSound, pasteSound: defaultPasteSound, soundLevel: 0.4, soundSteady: true])
     }
 }
 

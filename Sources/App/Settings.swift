@@ -17,6 +17,14 @@ final class SettingsModel: ObservableObject {
     @AppStorage(Pref.autoPaste) var autoPaste = true
     @AppStorage(Pref.linkPreviews) var linkPreviews = true
     @AppStorage(Pref.showMenuBar) var showMenuBar = true
+    @AppStorage(Pref.soundOnCopy) var soundOnCopy = true
+    @AppStorage(Pref.soundOnPaste) var soundOnPaste = true
+    @AppStorage(Pref.sound) var sound = Pref.defaultSound
+    @AppStorage(Pref.pasteSound) var pasteSound = Pref.defaultPasteSound
+    @AppStorage(Pref.soundLevel) var soundLevel = 0.4
+    @AppStorage(Pref.soundSteady) var soundSteady = true
+
+    func previewSound(_ id: String) { Chimes.shared.play(id, level: soundLevel, steady: soundSteady) }
 
     let store: Store
     let storeQueue: DispatchQueue
@@ -107,7 +115,7 @@ struct SettingsView: View {
 
     private static let tabs: [(id: String, name: String, icon: String)] = [
         ("general", "General", "gearshape"), ("shortcuts", "Shortcuts", "command"), ("history", "History", "clock"),
-        ("privacy", "Privacy", "hand.raised"), ("appearance", "Appearance", "paintpalette"), ("pinboards", "Pinboards", "pin"),
+        ("sound", "Sound", "speaker.wave.2"), ("privacy", "Privacy", "hand.raised"), ("appearance", "Appearance", "paintpalette"), ("pinboards", "Pinboards", "pin"),
     ]
 
     var body: some View {
@@ -135,6 +143,7 @@ struct SettingsView: View {
                 switch tab {
                 case "shortcuts": ShortcutsTab(settings: settings)
                 case "history": HistoryTab(settings: settings)
+                case "sound": SoundTab(settings: settings)
                 case "privacy": PrivacyTab(settings: settings)
                 case "appearance": AppearanceTab()
                 case "pinboards": PinboardsTab(settings: settings)
@@ -258,6 +267,67 @@ struct HistoryTab: View {
             }
         }
         .formStyle(.grouped)
+    }
+}
+
+struct SoundTab: View {
+    @ObservedObject var settings: SettingsModel
+
+    var body: some View {
+        Form {
+            Section("When something is copied") {
+                Toggle("Play a sound", isOn: $settings.soundOnCopy)
+                SoundPicker(selection: $settings.sound, settings: settings).disabled(!settings.soundOnCopy)
+            }
+            Section("When Mneme pastes for you") {
+                Toggle("Play a sound", isOn: $settings.soundOnPaste)
+                SoundPicker(selection: $settings.pasteSound, settings: settings).disabled(!settings.soundOnPaste)
+            }
+            Section {
+                LabeledContent("Loudness") {
+                    HStack(spacing: 8) {
+                        Image(systemName: "speaker.fill").font(.system(size: 10)).foregroundStyle(.secondary)
+                        Slider(value: $settings.soundLevel, in: 0...1) { editing in
+                            if !editing { settings.previewSound(settings.soundOnCopy || !settings.soundOnPaste ? settings.sound : settings.pasteSound) }
+                        }
+                        .accessibilityLabel("Loudness")
+                        Image(systemName: "speaker.wave.3.fill").font(.system(size: 10)).foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: 260)
+                }
+                Toggle("Same loudness at any Mac volume", isOn: $settings.soundSteady)
+                Text(settings.soundSteady
+                     ? "Turning your Mac up or down does not change these sounds. They only get quieter when the Mac is set below them, and they are silent when the Mac is muted."
+                     : "These sounds get louder and quieter with your Mac's volume, like other sounds.")
+                    .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            .disabled(!settings.soundOnCopy && !settings.soundOnPaste)
+        }
+        .formStyle(.grouped)
+    }
+}
+
+/// A sound choice with a button to hear it; picking one plays it.
+private struct SoundPicker: View {
+    @Binding var selection: String
+    @ObservedObject var settings: SettingsModel
+
+    var body: some View {
+        HStack {
+            Picker("Sound", selection: $selection) {
+                Section("Mneme") {
+                    ForEach(MadeSound.allCases, id: \.self) { Text($0.name).tag($0.rawValue) }
+                }
+                Section("Mac") {
+                    ForEach(Chimes.systemNames, id: \.self) { Text($0).tag("system:\($0)") }
+                }
+            }
+            Button { settings.previewSound(selection) } label: { Image(systemName: "play.circle") }
+                .buttonStyle(.borderless)
+                .help("Play")
+                .accessibilityLabel("Play")
+        }
+        .onChange(of: selection) { settings.previewSound(selection) }
     }
 }
 

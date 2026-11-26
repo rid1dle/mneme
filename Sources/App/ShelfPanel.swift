@@ -241,7 +241,10 @@ final class ShelfController: NSObject, NSWindowDelegate {
 
     func copy(_ item: Item) {
         hide()
-        put(item, plainText: false) { _ in Toast.show("Copied") }
+        put(item, plainText: false) { _ in
+            Chimes.shared.play(.copy)
+            Toast.show("Copied")
+        }
     }
 
     /// Loads the item on the store queue, then writes it to the clipboard on the main thread: the main thread never
@@ -271,6 +274,7 @@ final class ShelfController: NSObject, NSWindowDelegate {
         put(item, plainText: plainText) { _ in
             Task { @MainActor in
                 let result = await Paster.pressPaste(into: target, autoPaste: UserDefaults.standard.bool(forKey: Pref.autoPaste))
+                Chimes.shared.play(result == .pasted ? .paste : .copy)
                 if result == .copiedOnly { Toast.show("Copied. Press ⌘V to paste.") }
             }
         }

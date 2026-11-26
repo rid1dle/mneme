@@ -16,6 +16,8 @@ shortcut changeable. About 22 MB of memory when idle.
   app; drag cards to reorder them inside a pinboard.
 - **Paste stack:** **⇧⌘C**, copy several things, then press **⌘V** for each: they paste in the order copied. A small
   panel shows the order; drag to reorder, ✕ to remove.
+- **Sound:** a soft sound when a copy is saved and another when Mneme pastes. Settings → Sound picks each sound and
+  their loudness; by default they stay at the same loudness whatever your Mac's volume.
 - Every shortcut can be changed in Settings → Shortcuts (menu bar icon → Settings…, or the gear in the shelf).
 
 ## Permissions

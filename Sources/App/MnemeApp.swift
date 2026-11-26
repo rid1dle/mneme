@@ -157,6 +157,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         watcher = Watcher(store: store, storeQueue: storeQueue, rules: { [unowned self] in
             captureRules(.standard, paused: paused, ownChangeCount: ownChangeCount)
         }, onCapture: { [unowned self] item in
+            Chimes.shared.play(.copy)
             ocr.readSoon(item)
             if item.linkTitle == nil { links.fetch(item) }
             if stack.isOn {
@@ -237,6 +238,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// once the app has read it, unless another ⌘V already made the relay switch.
     private func stackPasted() {
         guard stack.isOn, let used = stack.next() else { return }
+        Chimes.shared.play(.paste)
         storeQueue.async { [store] in try? store?.markUsed(used, now: Date()) }
         pendingFlush?.cancel()
         let flush = DispatchWorkItem { [weak self] in
