@@ -33,7 +33,7 @@ struct ShelfView: View {
         .background { background }
         .tint(theme.accent)
         .environment(\.colorScheme, theme.colorScheme ?? systemScheme)
-        .onAppear { searchFocused = true }
+        .onAppear { if !LaunchOptions.current.offscreen { searchFocused = true } }
     }
 
     @Environment(\.colorScheme) private var systemScheme

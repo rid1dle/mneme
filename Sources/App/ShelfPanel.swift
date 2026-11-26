@@ -2,25 +2,6 @@ import AppKit
 import Carbon.HIToolbox
 import SwiftUI
 
-/// The borderless panel the shelf lives in: takes keys without activating Mneme, so the app the user was in stays
-/// frontmost underneath; shows on every space and over full-screen apps.
-final class ShelfPanel: NSPanel {
-    init() {
-        super.init(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
-        isOpaque = false
-        backgroundColor = .clear
-        hasShadow = true
-        level = .popUpMenu
-        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
-        hidesOnDeactivate = false
-        isReleasedWhenClosed = false
-        animationBehavior = .none
-    }
-
-    override var canBecomeKey: Bool { true }
-    override var canBecomeMain: Bool { false }
-}
-
 /// Opens, closes and drives the shelf. The SwiftUI tree exists only while the shelf is open.
 @MainActor
 final class ShelfController: NSObject, NSWindowDelegate {
@@ -35,6 +16,7 @@ final class ShelfController: NSObject, NSWindowDelegate {
     var onOpenSettings: () -> Void = {}
     private let panel = ShelfPanel()
     private var keyMonitor: Any?
+    private var closeObservers: [NSObjectProtocol] = []
     private var deleteGuard = DeleteKeyGuard()
     private(set) var previousApp: NSRunningApplication?
     private(set) var isOpen = false
@@ -85,9 +67,11 @@ final class ShelfController: NSObject, NSWindowDelegate {
             panel.displayIfNeeded()
             ready?()
         }
+        panel.prepare(offscreen: offscreen)
         if offscreen {
             panel.orderFrontRegardless()
         } else {
+            watchForLeaving()
             let target = panel.frame
             panel.setFrame(target.offsetBy(dx: 0, dy: -24), display: false)
             panel.alphaValue = 0
@@ -119,9 +103,28 @@ final class ShelfController: NSObject, NSWindowDelegate {
         isOpen = false
         if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
         keyMonitor = nil
+        for o in closeObservers { NSWorkspace.shared.notificationCenter.removeObserver(o) }
+        closeObservers = []
         panel.orderOut(nil)
         panel.contentView = nil
         model.releaseCaches()
+    }
+
+    /// Besides losing focus, the shelf closes when another app comes to the front or the user switches Space, so it
+    /// can never be left open over other work.
+    private func watchForLeaving() {
+        let center = NSWorkspace.shared.notificationCenter
+        let me = ProcessInfo.processInfo.processIdentifier
+        closeObservers = [
+            center.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { [weak self] note in
+                let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+                guard app?.processIdentifier != me else { return }
+                MainActor.assumeIsolated { self?.hide() }
+            },
+            center.addObserver(forName: NSWorkspace.activeSpaceDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.hide() }
+            },
+        ]
     }
 
     func windowDidResignKey(_ notification: Notification) {

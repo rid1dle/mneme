@@ -89,6 +89,15 @@ enum ScreenFixture {
             try t.png.write(to: store.blobs.appendingPathComponent(name))
             try store.setLinkPreview(link.id, title: "Vision | Apple Developer Documentation", image: name)
         }
+        for link in ["https://github.com/rid1dle/mneme/pull/7", "https://vishwa.atlassian.net/browse/PLAT-142",
+                     "https://linear.app/vishwa/issue/ENG-88/fix-the-sync-timeout", "https://docs.google.com/spreadsheets/d/1AbC/edit",
+                     "https://vishwa-ai.slack.com/archives/C05ABC123/p1764088140123456", "http://localhost:8000/api/run",
+                     "https://www.smashingmagazine.com/2024/05/how-to-ship-fast-without-breaking-things/"] {
+            _ = try add(text(link), apps[0], 1)
+        }
+        if let issue = try add(text("https://github.com/rid1dle/mneme/issues/12"), apps[0], 2) {
+            try store.setLinkPreview(issue.id, title: "Shelf: show pinboard names in search · Issue #12 · rid1dle/mneme · GitHub", image: nil)
+        }
         let sig = try add(text("Best regards,\nRid\nVishwa Labs"), apps[1], 3)
         try store.rename(sig!.id, title: "Email signature", now: next(1))
         try store.pin(sig!.id, to: snippets.id, now: next(1))

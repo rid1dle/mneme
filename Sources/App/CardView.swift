@@ -112,6 +112,19 @@ struct CardView: View, Equatable {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         case .link:
+            if let summary = URL(string: item.text ?? item.preview).flatMap(describeLink) {
+                SiteLinkView(summary: summary, title: item.linkTitle, image: linkImage)
+            } else {
+                plainLink
+            }
+        case .file:
+            fileContent
+        case .color:
+            colorContent
+        }
+    }
+
+    private var plainLink: some View {
             VStack(alignment: .leading, spacing: 6) {
                 if let linkImage {
                     Image(nsImage: linkImage).resizable().aspectRatio(contentMode: .fill)
@@ -126,7 +139,9 @@ struct CardView: View, Equatable {
                 Text(item.preview).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(4)
             }
             .padding(10)
-        case .file:
+    }
+
+    @ViewBuilder private var fileContent: some View {
             let missing = model.filesMissing(item)
             VStack(spacing: 8) {
                 if let icon = model.fileIcon(item) {
@@ -140,7 +155,9 @@ struct CardView: View, Equatable {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding(10)
-        case .color:
+    }
+
+    private var colorContent: some View {
             VStack(spacing: 8) {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .fill(Color(hex: item.preview))
@@ -148,7 +165,6 @@ struct CardView: View, Equatable {
                 Text(item.preview).font(.system(size: 13, weight: .semibold, design: .monospaced))
             }
             .padding(12)
-        }
     }
 
     private var footer: some View {
@@ -161,5 +177,61 @@ struct CardView: View, Equatable {
         }
         .padding(.horizontal, 10)
         .frame(height: 24)
+    }
+}
+
+/// Any link, explained from its address (a GitHub pull request, a Jira ticket, a Notion page, a plain page...):
+/// a badge for the site, where it lives, what it is, and the page's title and preview image when the page gave them
+/// (private pages do not).
+struct SiteLinkView: View {
+    let summary: LinkSummary
+    let title: String?
+    let image: NSImage?
+
+    private var cleanTitle: String? {
+        guard let t = title.map({ cleanPageTitle($0, site: summary.site) }), !t.isEmpty, t != summary.headline else { return nil }
+        return t
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 8) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color(hex: summary.color))
+                    if let symbol = summary.symbol {
+                        Image(systemName: symbol).font(.system(size: 14, weight: .semibold))
+                    } else {
+                        Text(summary.site.prefix(1).uppercased()).font(.system(size: 15, weight: .bold, design: .rounded))
+                    }
+                }
+                .foregroundStyle(.white)
+                .frame(width: 30, height: 30)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(summary.site).font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary).lineLimit(1)
+                    Text(summary.context).font(.system(size: 11, weight: .medium)).lineLimit(1).truncationMode(.middle)
+                }
+            }
+            if let image {
+                Image(nsImage: image).resizable().aspectRatio(contentMode: .fill)
+                    .frame(maxWidth: .infinity).frame(height: 70).clipped()
+                    .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    .padding(.top, 2)
+            }
+            if summary.headline.count <= 14 {
+                Text(summary.headline)
+                    .font(.system(size: image == nil ? 24 : 18, weight: .bold, design: .rounded))
+                    .lineLimit(1).minimumScaleFactor(0.55)
+                    .padding(.top, image == nil ? 4 : 0)
+            } else {
+                Text(summary.headline).font(.system(size: 14, weight: .semibold)).lineLimit(image == nil ? 3 : 2).padding(.top, 2)
+            }
+            if summary.kind != summary.context && summary.kind != summary.headline && summary.kind != summary.site {
+                Text(summary.kind).font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary).lineLimit(1)
+            }
+            if let detail = summary.detail { Text(detail).font(.system(size: 12)).lineLimit(2) }
+            if let t = cleanTitle { Text(t).font(.system(size: 12)).lineLimit(image == nil ? 3 : 2) }
+        }
+        .padding(10)
+        .accessibilityElement(children: .combine)
     }
 }

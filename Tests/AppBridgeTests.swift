@@ -108,3 +108,13 @@ let appBridgeTests: [TestCase] = [
         expectEqual(historyMaxAge(d), nil)
     },
 ]
+
+let shelfWindowTests: [TestCase] = [
+    test("should let the real shelf take keys after an off-screen drawing") {
+        let p = ShelfPanel()
+        p.prepare(offscreen: true)
+        expect(!p.canBecomeKey, "an off-screen drawing must not take focus")
+        p.prepare(offscreen: false)
+        expect(p.canBecomeKey, "the real shelf must take focus so Esc and typing reach it")
+    },
+]
