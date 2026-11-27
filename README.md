@@ -48,11 +48,38 @@ survive rebuilds.
 - The only network use is link previews (the start of a copied link's page, no cookies); turn it off in
   Settings → Privacy. No telemetry.
 
+## Updates
+
+Mneme 0.4 and later keep themselves up to date. At launch and every six hours Mneme reads the newest release's
+`update.json`, downloads a newer version, checks its size, SHA-256 and Ed25519 signature against the release key built
+into the app, unpacks it, checks the app inside (bundle id, version, code signature), then swaps it in and reopens:
+on its own while the shelf is closed and the paste stack is off, or from the menu ("Restart to Update to …") when
+Settings → General → Install updates automatically is off. Permissions carry over: the app is signed with a
+requirement on its bundle id, not on each build.
+
+Mneme must run from a folder it can write to (`~/Applications` or `/Applications`), not straight from Downloads.
+
+## Releasing
+
+```sh
+scripts/release 0.5 "What changed, in a sentence or two"
+```
+
+It sets the version, runs the tests, commits, tags `v0.5` and pushes. `.github/workflows/release.yml` then tests,
+builds, zips and signs on a macOS runner and publishes the GitHub release with the zip and `update.json`; every copy
+of Mneme finds it within six hours. Run the workflow by hand (Actions → Release → Run workflow) for a dry run that
+publishes nothing and keeps the files as an artifact. `./build.sh release` makes the same files locally.
+
+The release key: the public half is `UpdateFeed.publicKey` in `Sources/Core/Update.swift`; the private half is the
+repository secret `MNEME_UPDATE_KEY`, backed up at `~/.config/mneme/update-signing-key` (never commit it). Without it
+no update can be signed: copies of Mneme would need a manual reinstall of a build with a new public key.
+
 ## Where things are
 
 - History: `~/Library/Application Support/Mneme/` (`mneme.sqlite`, `Blobs/`, `Thumbs/`).
 - Settings: `defaults read local.mneme`.
 - Images being edited in Preview: `~/Library/Caches/local.mneme/Edits/`.
+- Downloaded updates waiting to be installed: `~/Library/Caches/local.mneme/Update/`.
 
 ## Build
 
@@ -62,6 +89,7 @@ Needs the Command Line Tools only (no Xcode, no SwiftPM).
 ./build.sh            # build/Mneme.app
 ./build.sh test       # unit tests (optional name filter: ./build.sh test Capture)
 ./build.sh install    # build and copy to ~/Applications/Mneme.app
+./build.sh release    # build/release: the zip and a signed update.json
 ```
 
 Development helpers (they never touch your real history):

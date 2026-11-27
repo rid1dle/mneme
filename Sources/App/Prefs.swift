@@ -19,6 +19,10 @@ enum Pref {
     static let formatOnCommandV = "formatOnCommandV" // Bool, true: ⌘V in any app gets the form of a text copy that suits it
     static let formatFromMneme = "formatFromMneme"   // Bool, true: the same for pastes from the shelf
     static let pasteLearning = "pasteLearning"       // Data, JSON PasteLearning: the user's choices per place
+    static let autoUpdate = "autoUpdate"             // Bool, true: install a downloaded update on its own while Mneme is idle
+    static let updateFeed = "updateFeed"             // String, a manifest URL in place of the release feed (testing)
+    static let updateLastChecked = "updateLastChecked" // Date
+    static let lastRunVersion = "lastRunVersion"     // String, the version that ran last, to say when it was updated
     static let defaultSound = MadeSound.drop.rawValue
     static let defaultPasteSound = MadeSound.pluck.rawValue
     // Shortcuts live under Shortcuts.key.
@@ -27,7 +31,7 @@ enum Pref {
         d.register(defaults: [historyDays: 30, linkPreviews: true, autoPaste: true, showMenuBar: true,
                                  soundOnCopy: true, soundOnPaste: true, sound: defaultSound, pasteSound: defaultPasteSound, soundLevel: 0.4, soundSteady: true,
                                  shelfMotion: ShelfMotion.standard.rawValue,
-                                 formatOnCommandV: true, formatFromMneme: true])
+                                 formatOnCommandV: true, formatFromMneme: true, autoUpdate: true])
     }
 }
 

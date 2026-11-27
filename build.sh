@@ -4,6 +4,8 @@
 #   ./build.sh test     build and run the tests (an optional argument filters by name)
 #   ./build.sh spike    build the permission spike into build/Spike.app
 #   ./build.sh install  build the app and put it in ~/Applications
+#   ./build.sh release  build the app, zip it into build/release with a signed update.json (the release key comes from
+#                       MNEME_UPDATE_KEY or ~/.config/mneme/update-signing-key; notes from MNEME_NOTES_FILE)
 set -euo pipefail
 cd "$(dirname "$0")"
 mkdir -p build
@@ -30,7 +32,7 @@ case "${1:-app}" in
   test)
     CORE=(Sources/Core/*.swift(N))
     # App files the tests exercise without a running app (only those that exist yet).
-    BRIDGE=(Sources/App/{Paster,Thumbs,Prefs,Hotkey,Shortcuts,StackRelay,ShelfWindow,Chimes,PasteFormatter,RTFReader}.swift(N))
+    BRIDGE=(Sources/App/{Paster,Thumbs,Prefs,Hotkey,Shortcuts,StackRelay,ShelfWindow,Chimes,PasteFormatter,RTFReader,Updater}.swift(N))
     swiftc -swift-version 5 -target arm64-apple-macos14.0 -o build/tests $CORE $BRIDGE Tests/*.swift
     ./build/tests "${@:2}"
     ;;
@@ -40,6 +42,20 @@ case "${1:-app}" in
     ;;
   app)
     bundle build/Mneme.app Mneme local.mneme Resources/Info.plist Sources/Core/*.swift Sources/App/*.swift
+    ;;
+  release)
+    "$0" app
+    v=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" Resources/Info.plist)
+    b=$(/usr/libexec/PlistBuddy -c "Print CFBundleVersion" Resources/Info.plist)
+    os=$(/usr/libexec/PlistBuddy -c "Print LSMinimumSystemVersion" Resources/Info.plist)
+    out=build/release zip="Mneme-$v-arm64.zip"
+    rm -rf $out && mkdir -p $out
+    ditto -c -k --sequesterRsrc --keepParent build/Mneme.app "$out/$zip"
+    key=${MNEME_UPDATE_KEY:-$(cat "$HOME/.config/mneme/update-signing-key" 2>/dev/null || true)}
+    [[ -n $key ]] || { echo "no release key: set MNEME_UPDATE_KEY or put it in ~/.config/mneme/update-signing-key" >&2; exit 1; }
+    swiftc -swift-version 5 -target arm64-apple-macos14.0 -o build/sign-release Sources/Core/Update.swift Tools/sign-release/main.swift
+    MNEME_UPDATE_KEY=$key ./build/sign-release "$out/$zip" "$v" "$b" "https://github.com/rid1dle/mneme/releases/download/v$v/$zip" "$os" ${MNEME_NOTES_FILE:+"$MNEME_NOTES_FILE"} > "$out/update.json"
+    echo "release $v in $out: $zip, update.json"
     ;;
   install)
     "$0" app

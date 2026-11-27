@@ -217,8 +217,53 @@ struct GeneralTab: View {
                     NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
                 }
             }
+            if let updater = settings.app?.updater { UpdatesSection(updater: updater) }
         }
         .formStyle(.grouped)
+    }
+}
+
+private struct UpdatesSection: View {
+    @ObservedObject var updater: Updater
+    @AppStorage(Pref.autoUpdate) private var autoUpdate = true
+
+    var body: some View {
+        Section("Updates") {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Mneme \(updater.current)").font(.system(size: 13, weight: .medium))
+                    Text(status).font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+                if case .ready(let m) = updater.state {
+                    Button("Restart to Update to \(m.version)") { updater.installNow() }
+                } else {
+                    Button("Check Now") { updater.check(manual: true) }
+                        .disabled(updater.state == .checking || isDownloading)
+                }
+            }
+            if case .ready(let m) = updater.state, !m.notes.isEmpty {
+                Text(m.notes).font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            Toggle("Install updates automatically", isOn: $autoUpdate)
+            Text("New versions are checked every six hours, downloaded, and checked against Mneme's release signature. With this on, Mneme installs one and reopens while you are not using it.")
+                .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var isDownloading: Bool { if case .downloading = updater.state { return true }; return false }
+
+    private var status: String {
+        switch updater.state {
+        case .checking: return "Checking for a new version…"
+        case .downloading(let v): return "Downloading \(v)…"
+        case .ready(let m): return "Version \(m.version) is ready." + (autoUpdate ? " It installs the next time you are not using Mneme." : "")
+        case .failed(let why): return why
+        case .upToDate, .idle:
+            if let why = updater.cannotUpdate { return why }
+            guard let d = updater.lastChecked else { return "Not checked yet." }
+            return "Up to date. Checked " + d.formatted(.relative(presentation: .named)) + "."
+        }
     }
 }
 

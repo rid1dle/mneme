@@ -90,6 +90,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var stackTap: StackTap!
     private var stackRelay: StackRelay!
     private(set) var formatter: PasteFormatter!
+    private(set) lazy var updater = Updater()
     private var pendingFlush: DispatchWorkItem?
     private var stackPanel: StackPanelController!
     var shortcuts = Shortcuts.load()
@@ -174,6 +175,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         watcher.onAccessChange = { [unowned self] allowed in model.captureAllowed = allowed }
         watcher.onCopied = { [formatter] capture, count in formatter?.copied(capture.representations, source: capture.source, changeCount: count) }
         formatter.watchFrontApp()
+        if !o.offscreen {
+            updater.isBusy = { [unowned self] in shelf.isOpen || stack.isOn }
+            if updater.start() != nil {
+                let now = updater.current
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { MainActor.assumeIsolated { Toast.show("Mneme updated to \(now)") } }
+            }
+        }
         model.captureAllowed = watcher.captureAllowed
         watcher.start()
         ocr.start()
@@ -404,6 +412,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc func openSettingsFromMenu() { openSettings() }
+    @objc func installUpdate() { updater.installNow() }
+    @objc func checkForUpdates() {
+        updater.check(manual: true)
+        openSettings()
+    }
 
     private func runWindowSnapshot(to out: String) {
         let o = LaunchOptions.current
@@ -446,6 +459,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let open = NSMenuItem(title: shortcuts[.openShelf].map { "Open Mneme (\($0.display))" } ?? "Open Mneme", action: #selector(openShelf), keyEquivalent: "")
         open.target = self
         menu.addItem(open)
+        if case .ready(let m) = updater.state {
+            let update = NSMenuItem(title: "Restart to Update to \(m.version)", action: #selector(installUpdate), keyEquivalent: "")
+            update.target = self
+            update.image = NSImage(systemSymbolName: "arrow.down.circle", accessibilityDescription: nil)
+            menu.addItem(update)
+        }
         if !model.captureAllowed {
             let off = NSMenuItem(title: "Capture is off: allow Mneme in Paste from Other Apps", action: #selector(openPasteSettings), keyEquivalent: "")
             off.target = self
@@ -464,6 +483,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         settings.target = self
         settings.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: nil)
         menu.addItem(settings)
+        let check = NSMenuItem(title: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "")
+        check.target = self
+        menu.addItem(check)
         menu.addItem(NSMenuItem(title: "Quit Mneme", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
     }
 
