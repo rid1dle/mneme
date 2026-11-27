@@ -145,6 +145,24 @@ func searchFieldOwns(_ c: KeyCombo, searchEmpty: Bool) -> Bool {
     return false
 }
 
+/// Tab moves the shelf to the next of History and the pinboards, ⇧Tab to the one before: 1, -1, or nil for any
+/// other key and for a Tab the user gave to one of their shortcuts.
+func boardStep(_ c: KeyCombo, shortcuts: Shortcuts) -> Int? {
+    guard Int(c.keyCode) == kVK_Tab, shortcuts.action(for: c, shelf: true) == nil else { return nil }
+    switch c.modifiers {
+    case 0: return 1
+    case UInt32(shiftKey): return -1
+    default: return nil
+    }
+}
+
+/// The board a step lands on: History (nil), then each pinboard in order, wrapping around at both ends.
+func cycledBoard(from current: UUID?, boards: [UUID], step: Int) -> UUID? {
+    let order: [UUID?] = [nil] + boards
+    let at = order.firstIndex(of: current) ?? 0
+    return order[((at + step) % order.count + order.count) % order.count]
+}
+
 /// ⌫ and ⌘⌫ remove cards only on a fresh press that starts with the search already empty, never on key repeat:
 /// holding ⌫ to clear the search must not go on to delete cards once the text is gone.
 struct DeleteKeyGuard {

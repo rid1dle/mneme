@@ -79,4 +79,32 @@ let shortcutTests: [TestCase] = [
         expectEqual(carbonModifiers([.command, .shift]), UInt32(cmdKey | shiftKey))
         expectEqual(carbonModifiers([.control, .option, .capsLock, .function]), UInt32(controlKey | optionKey))
     },
+    test("should step forward on Tab and back on shift Tab, and leave other keys alone") {
+        let s = Shortcuts.load(defaults())
+        expectEqual(boardStep(combo(kVK_Tab), shortcuts: s), 1)
+        expectEqual(boardStep(combo(kVK_Tab, shiftKey), shortcuts: s), -1)
+        expect(boardStep(combo(kVK_Tab, cmdKey), shortcuts: s) == nil, "⌘Tab is the app switcher")
+        expect(boardStep(combo(kVK_Tab, optionKey), shortcuts: s) == nil)
+        expect(boardStep(combo(kVK_RightArrow), shortcuts: s) == nil)
+    },
+    test("should leave Tab to a shortcut the user gave it") {
+        var s = Shortcuts.load(defaults())
+        s[.preview] = combo(kVK_Tab)
+        expect(boardStep(combo(kVK_Tab), shortcuts: s) == nil)
+        expectEqual(boardStep(combo(kVK_Tab, shiftKey), shortcuts: s), -1, "shift Tab still switches")
+    },
+    test("should cycle from History through each pinboard and wrap around both ways") {
+        let a = UUID(), b = UUID()
+        expectEqual(cycledBoard(from: nil, boards: [a, b], step: 1), a)
+        expectEqual(cycledBoard(from: a, boards: [a, b], step: 1), b)
+        expect(cycledBoard(from: b, boards: [a, b], step: 1) == nil, "after the last pinboard comes History")
+        expectEqual(cycledBoard(from: nil, boards: [a, b], step: -1), b, "before History comes the last pinboard")
+        expectEqual(cycledBoard(from: b, boards: [a, b], step: -1), a)
+    },
+    test("should stay on History when there are no pinboards, and start over from History when the pinboard is gone") {
+        expect(cycledBoard(from: nil, boards: [], step: 1) == nil)
+        expect(cycledBoard(from: nil, boards: [], step: -1) == nil)
+        let a = UUID()
+        expectEqual(cycledBoard(from: UUID(), boards: [a], step: 1), a)
+    },
 ]

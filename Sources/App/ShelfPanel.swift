@@ -286,6 +286,10 @@ final class ShelfController: NSObject, NSWindowDelegate {
         default:
             break
         }
+        if let step = boardStep(KeyCombo(keyCode: UInt32(key), modifiers: carbonModifiers(mods)), shortcuts: shortcuts) {
+            model.pinboard = cycledBoard(from: model.pinboard, boards: model.pinboards.map(\.id), step: step)
+            return true
+        }
         if mods == .command, let n = Self.digitKeys.firstIndex(of: key) {
             if model.items.indices.contains(n) { paste(model.items[n], as: nil) }
             return true

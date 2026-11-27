@@ -143,6 +143,7 @@ struct ShelfView: View {
             .background(Capsule().fill(selected ? Color.primary.opacity(0.12) : Color.clear))
         }
         .buttonStyle(.plain)
+        .help("Tab and ⇧Tab switch between History and pinboards")
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 

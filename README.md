@@ -9,7 +9,8 @@ shortcut changeable. About 22 MB of memory when idle.
 ## Use
 
 - **⇧⌘V** opens the shelf over any app. Type to search, ← → to move, **Return** pastes into the app you were in
-  (⇧Return as plain text), **⌘1** to **⌘9** paste one of the first nine, **Esc** closes.
+  (⇧Return as plain text), **⌘1** to **⌘9** paste one of the first nine, **Tab** and **⇧Tab** switch between History and your pinboards,
+  **Esc** closes.
 - On a card: **Space** preview, **⌘E** edit (text in place, keeping formatting; images open in Preview and the card
   updates when you save), **⌘C** copy, **⌫** remove from History (or from the pinboard you are in), **⌘⌫** delete
   everywhere, **⌘R** rename, **⌘N** new pinboard. Right-click for the same plus **Pin to**. Drag a card out into any
