@@ -15,13 +15,19 @@ enum Pref {
     static let pasteSound = "pasteSound"        // String, the paste sound, same values
     static let soundLevel = "soundLevel"        // Double 0...1, 0.4
     static let soundSteady = "soundSteady"      // Bool, true: the same loudness whatever the Mac's volume
+    static let shelfMotion = "shelfMotion"      // String, a ShelfMotion raw value: how the shelf opens and closes
+    static let formatOnCommandV = "formatOnCommandV" // Bool, true: ⌘V in any app gets the form of a text copy that suits it
+    static let formatFromMneme = "formatFromMneme"   // Bool, true: the same for pastes from the shelf
+    static let pasteLearning = "pasteLearning"       // Data, JSON PasteLearning: the user's choices per place
     static let defaultSound = MadeSound.drop.rawValue
     static let defaultPasteSound = MadeSound.pluck.rawValue
     // Shortcuts live under Shortcuts.key.
 
     static func register(_ d: UserDefaults = .standard) {
         d.register(defaults: [historyDays: 30, linkPreviews: true, autoPaste: true, showMenuBar: true,
-                                 soundOnCopy: true, soundOnPaste: true, sound: defaultSound, pasteSound: defaultPasteSound, soundLevel: 0.4, soundSteady: true])
+                                 soundOnCopy: true, soundOnPaste: true, sound: defaultSound, pasteSound: defaultPasteSound, soundLevel: 0.4, soundSteady: true,
+                                 shelfMotion: ShelfMotion.standard.rawValue,
+                                 formatOnCommandV: true, formatFromMneme: true])
     }
 }
 

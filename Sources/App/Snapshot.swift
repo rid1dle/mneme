@@ -11,8 +11,9 @@ enum Snapshot {
         if let number = UInt32(exactly: window.windowNumber), number > 0,
            let sym = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "CGWindowListCreateImage") {
             let create = unsafeBitCast(sym, to: WindowImage.self)
-            // IncludingWindow (1 << 3) with ImageBoundsIgnoreFraming (1 << 0): this window only.
-            if let img = create(.null, 1 << 3, number, 1 << 0)?.takeRetainedValue(), img.width > 10 {
+            // IncludingWindow (1 << 3) with ImageBoundsIgnoreFraming (1 << 0): this window only. MNEME_FRAMING=1 keeps
+            // the frame the system draws around it (its shadow), to check how the window sits on screen.
+            if let img = create(.null, 1 << 3, number, ProcessInfo.processInfo.environment["MNEME_FRAMING"] == nil ? 1 << 0 : 0)?.takeRetainedValue(), img.width > 10 {
                 data = NSBitmapImageRep(cgImage: img).representation(using: .png, properties: [:])
             }
         }

@@ -9,6 +9,7 @@ final class StackRelay: @unchecked Sendable {
     private let lock = NSLock()
     private var upcoming: [[Representation]] = []
     private var owed = false
+    private var active = true
     private let write: ([Representation]) -> Void
 
     init(write: @escaping ([Representation]) -> Void) { self.write = write }
@@ -19,9 +20,17 @@ final class StackRelay: @unchecked Sendable {
         upcoming = items
     }
 
+    /// While off, ⌘V presses leave the stack alone (the key watcher also runs for formatting).
+    func setActive(_ on: Bool) {
+        lock.lock(); defer { lock.unlock() }
+        active = on
+        if !on { owed = false }
+    }
+
     /// A ⌘V was pressed (it pastes whatever is on the clipboard now).
     func commandV() {
         lock.lock(); defer { lock.unlock() }
+        guard active else { return }
         if owed, !upcoming.isEmpty { write(upcoming.removeFirst()) }
         owed = true
     }

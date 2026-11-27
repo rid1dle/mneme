@@ -23,6 +23,17 @@ final class SettingsModel: ObservableObject {
     @AppStorage(Pref.pasteSound) var pasteSound = Pref.defaultPasteSound
     @AppStorage(Pref.soundLevel) var soundLevel = 0.4
     @AppStorage(Pref.soundSteady) var soundSteady = true
+    @AppStorage(Pref.formatOnCommandV) var formatOnCommandV = true
+    @AppStorage(Pref.formatFromMneme) var formatFromMneme = true
+    @Published var learned: [(key: String, name: String, version: PasteVersion)] = []
+
+    func reloadLearned() { learned = app?.formatter?.learnedRules ?? [] }
+    func forget(_ key: String?) { app?.formatter?.forget(key); reloadLearned() }
+    func showPasteLog() {
+        let url = LaunchOptions.current.storeDirectory.appendingPathComponent("paste-log.jsonl")
+        if FileManager.default.fileExists(atPath: url.path) { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+        else { NSWorkspace.shared.open(url.deletingLastPathComponent()) }
+    }
 
     func previewSound(_ id: String) { Chimes.shared.play(id, level: soundLevel, steady: soundSteady) }
 
@@ -43,6 +54,7 @@ final class SettingsModel: ObservableObject {
         accessibility = AXIsProcessTrusted()
         clipboardAllowed = Watcher.accessAllowed()
         openAtLogin = SMAppService.mainApp.status == .enabled
+        app?.updatePasteTap()
     }
 
     // MARK: shortcuts
@@ -115,7 +127,7 @@ struct SettingsView: View {
 
     private static let tabs: [(id: String, name: String, icon: String)] = [
         ("general", "General", "gearshape"), ("shortcuts", "Shortcuts", "command"), ("history", "History", "clock"),
-        ("sound", "Sound", "speaker.wave.2"), ("privacy", "Privacy", "hand.raised"), ("appearance", "Appearance", "paintpalette"), ("pinboards", "Pinboards", "pin"),
+        ("pasting", "Pasting", "doc.on.clipboard"), ("sound", "Sound", "speaker.wave.2"), ("privacy", "Privacy", "hand.raised"), ("appearance", "Appearance", "paintpalette"), ("pinboards", "Pinboards", "pin"),
     ]
 
     var body: some View {
@@ -127,7 +139,7 @@ struct SettingsView: View {
                             Image(systemName: t.icon).font(.system(size: 17)).frame(height: 20)
                             Text(t.name).font(.system(size: 11))
                         }
-                        .frame(width: 84, height: 48)
+                        .frame(width: 72, height: 48)
                         .foregroundStyle(tab == t.id ? theme.accent : Color.secondary)
                         .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(tab == t.id ? Color.primary.opacity(0.08) : .clear))
                         .contentShape(Rectangle())
@@ -144,6 +156,7 @@ struct SettingsView: View {
                 case "shortcuts": ShortcutsTab(settings: settings)
                 case "history": HistoryTab(settings: settings)
                 case "sound": SoundTab(settings: settings)
+                case "pasting": PastingTab(settings: settings)
                 case "privacy": PrivacyTab(settings: settings)
                 case "appearance": AppearanceTab()
                 case "pinboards": PinboardsTab(settings: settings)
@@ -267,6 +280,68 @@ struct HistoryTab: View {
             }
         }
         .formStyle(.grouped)
+    }
+}
+
+struct PastingTab: View {
+    @ObservedObject var settings: SettingsModel
+
+    private static let rules: [(place: String, gets: String)] = [
+        ("Excel, Numbers, Google Sheets", "Everything as copied, colours and cell styling included"),
+        ("Gmail, Mail, Docs, Notion, Slack and other apps", "Bullets, bold, links, code and tables kept; colours, backgrounds and fonts dropped"),
+        ("Code editors and terminals", "Plain text, lists as - bullets; code exactly as copied"),
+        ("WhatsApp, Telegram, Messages", "Plain text, lists as • bullets"),
+        ("The app it was copied from", "Exactly as copied"),
+    ]
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle("Fix formatting when I press ⌘V", isOn: $settings.formatOnCommandV)
+                    .onChange(of: settings.formatOnCommandV) { settings.app?.updatePasteTap() }
+                Toggle("Fix formatting when I paste from Mneme", isOn: $settings.formatFromMneme)
+                Text(settings.accessibility
+                     ? "Text you copy is pasted in the form that suits the app, or the site in a browser, it goes into. Plain text that is written as Markdown becomes formatted text in apps that take formatting."
+                     : "⌘V needs Accessibility, which is off: allow it in General.")
+                    .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            Section("What each place gets") {
+                ForEach(Self.rules, id: \.place) { r in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(r.place).font(.system(size: 12, weight: .medium))
+                        Text(r.gets).font(.system(size: 11)).foregroundStyle(.secondary)
+                    }
+                }
+                Text("Any other way, any time: \(settings.shortcuts[.pastePlainNow]?.display ?? "the plain text shortcut") pastes plain text and \(settings.shortcuts[.pasteOriginalNow]?.display ?? "the original shortcut") the original. In the shelf, ⇧↩ and ⌥↩ do the same.")
+                    .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            Section("Learned from you") {
+                if settings.learned.isEmpty {
+                    Text("Nothing yet. Choose plain text or the original the same way twice in one place, and Mneme does it that way there from then on.")
+                        .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                } else {
+                    ForEach(settings.learned, id: \.key) { rule in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(rule.name).font(.system(size: 12))
+                                Text(rule.version.name).font(.system(size: 11)).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Button { settings.forget(rule.key) } label: { Image(systemName: "minus.circle") }
+                                .buttonStyle(.borderless)
+                                .help("Forget")
+                                .accessibilityLabel("Forget \(rule.name)")
+                        }
+                    }
+                    Button("Forget All") { settings.forget(nil) }
+                }
+                Button("Show Paste Log") { settings.showPasteLog() }
+                Text("Where each paste went and the form it got, never what was in it, kept on this Mac to improve these rules.")
+                    .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .formStyle(.grouped)
+        .onAppear { settings.reloadLearned() }
     }
 }
 
@@ -415,8 +490,87 @@ struct AppearanceTab: View {
                 }
                 .pickerStyle(.segmented)
             }
+            Section("Opening and closing") {
+                MotionChoices()
+            }
         }
         .formStyle(.grouped)
+    }
+}
+
+/// The shelf's animation styles as tiles; the chosen one, or the one under the pointer, plays its preview on a loop.
+private struct MotionChoices: View {
+    @EnvironmentObject var theme: ThemeStore
+    @AppStorage(Pref.shelfMotion) private var saved = ShelfMotion.standard.rawValue
+    @State private var hovered: ShelfMotion?
+
+    var body: some View {
+        let chosen = ShelfMotion(saved: saved)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 12) {
+                ForEach(ShelfMotion.allCases, id: \.self) { m in
+                    Button { saved = m.rawValue } label: {
+                        VStack(spacing: 6) {
+                            MotionPreview(motion: m, playing: (hovered ?? chosen) == m)
+                                .frame(width: 120, height: 76)
+                                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .strokeBorder(chosen == m ? theme.accent : Color.primary.opacity(0.15), lineWidth: chosen == m ? 3 : 1))
+                            Text(m.name).font(.system(size: 12))
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .onHover { inside in hovered = inside ? m : (hovered == m ? nil : hovered) }
+                    .accessibilityLabel(m.name)
+                    .accessibilityHint(m.detail)
+                    .accessibilityAddTraits(chosen == m ? .isSelected : [])
+                }
+            }
+            Text((hovered ?? chosen).detail).font(.system(size: 11)).foregroundStyle(.secondary)
+        }
+    }
+}
+
+/// A small screen with a shelf at its bottom, moving the way the real one does. Draws only while playing.
+private struct MotionPreview: View {
+    let motion: ShelfMotion
+    let playing: Bool
+    @EnvironmentObject var theme: ThemeStore
+    @Environment(\.colorScheme) private var scheme
+    @State private var start = Date()
+
+    private static let shelfHeight = 26.0
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: nil, paused: !playing)) { context in
+            let pose = playing ? motion.loopPose(at: context.date.timeIntervalSince(start), shelfHeight: Self.shelfHeight, pointScale: 0.4) : .rest
+            ZStack(alignment: .bottom) {
+                LinearGradient(colors: [theme.accent.opacity(0.35), theme.accent.opacity(0.1)], startPoint: .top, endPoint: .bottom)
+                shelf
+                    .scaleEffect(pose.scale)
+                    .offset(y: pose.drop)
+                    .opacity(pose.opacity)
+                    .padding(.horizontal, 6)
+                    .padding(.bottom, 4)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+        .onChange(of: playing) { if playing { start = Date() } }
+    }
+
+    private var shelf: some View {
+        VStack(spacing: 0) {
+            theme.accent.frame(height: 4)
+            HStack(spacing: 3) {
+                ForEach(0..<5, id: \.self) { _ in
+                    RoundedRectangle(cornerRadius: 2, style: .continuous).fill(Color.primary.opacity(0.18))
+                }
+            }
+            .padding(3)
+        }
+        .frame(height: Self.shelfHeight)
+        .background(scheme == .dark ? Color(white: 0.2) : Color(white: 0.97))
+        .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+        .shadow(color: .black.opacity(0.2), radius: 2, y: 1)
     }
 }
 

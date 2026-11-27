@@ -40,11 +40,14 @@ struct ShelfView: View {
 
     @ViewBuilder private var background: some View {
         let shape = RoundedRectangle(cornerRadius: 22, style: .continuous)
-        if theme.theme.shelf == .glass {
-            Color.clear.glassSurface(shape)
-        } else {
-            shape.fill(Color(nsColor: .windowBackgroundColor))
-                .overlay(shape.strokeBorder(Color.primary.opacity(0.10)))
+        ZStack {
+            ShelfShadow(shape: shape)
+            if theme.theme.shelf == .glass {
+                Color.clear.glassSurface(shape)
+            } else {
+                shape.fill(Color(nsColor: .windowBackgroundColor))
+                    .overlay(shape.strokeBorder(Color.primary.opacity(0.10)))
+            }
         }
     }
 
@@ -197,4 +200,20 @@ struct ShelfView: View {
 
 extension Overlay {
     var isPreview: Bool { if case .preview = self { return true } else { return false } }
+}
+
+/// The shelf's shadow, following its rounded shape, with the inside cut away so it never darkens the glass.
+struct ShelfShadow: View {
+    let shape: RoundedRectangle
+
+    var body: some View {
+        shape.fill(Color.black)
+            .shadow(color: .black.opacity(0.35), radius: 14, y: 5)
+            .mask {
+                Rectangle().padding(-ShelfPanel.margin)
+                    .overlay(shape.blendMode(.destinationOut))
+                    .compositingGroup()
+            }
+            .allowsHitTesting(false)
+    }
 }

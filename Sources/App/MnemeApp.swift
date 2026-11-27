@@ -89,6 +89,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var globalHotkeys: [ShortcutAction: Hotkey] = [:]
     private var stackTap: StackTap!
     private var stackRelay: StackRelay!
+    private(set) var formatter: PasteFormatter!
     private var pendingFlush: DispatchWorkItem?
     private var stackPanel: StackPanelController!
     var shortcuts = Shortcuts.load()
@@ -139,6 +140,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         shelf = ShelfController(model: model, theme: theme, paster: Paster(store: store))
         shelf.offscreen = o.offscreen
         shelf.onOwnWrite = { [unowned self] count in ownChangeCount = count }
+        formatter = PasteFormatter(logURL: o.storeDirectory.appendingPathComponent("paste-log.jsonl"))
+        formatter.onOwnWrite = { [unowned self] count in ownChangeCount = count }
+        shelf.formatter = formatter
         imageEditor = ImageEditor(store: store, storeQueue: storeQueue) { [unowned self] in
             if shelf.isOpen { model.reload(keepSelection: true) }
             Toast.show("Image updated")
@@ -168,6 +172,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if o.log { FileHandle.standardError.write("captured \(item.kind.rawValue) from \(item.source?.name ?? "?"): \(item.preview.prefix(60))\n".data(using: .utf8)!) }
         })
         watcher.onAccessChange = { [unowned self] allowed in model.captureAllowed = allowed }
+        watcher.onCopied = { [formatter] capture, count in formatter?.copied(capture.representations, source: capture.source, changeCount: count) }
+        formatter.watchFrontApp()
         model.captureAllowed = watcher.captureAllowed
         watcher.start()
         ocr.start()
@@ -177,8 +183,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         globalHotkeys[.openShelf] = Hotkey(shortcuts[.openShelf]) { [unowned self] in shelf.toggle() }
         globalHotkeys[.toggleStack] = Hotkey(shortcuts[.toggleStack]) { [unowned self] in toggleStack() }
         globalHotkeys[.pasteNext] = Hotkey(shortcuts[.pasteNext]) { [unowned self] in pasteNext() }
+        globalHotkeys[.pastePlainNow] = Hotkey(shortcuts[.pastePlainNow]) { [unowned self] in pasteNow(.plain) }
+        globalHotkeys[.pasteOriginalNow] = Hotkey(shortcuts[.pasteOriginalNow]) { [unowned self] in pasteNow(.original) }
         stackRelay = StackRelay { reps in Paster.write(reps, plainText: false, fallbackText: nil, to: .general) }
-        stackTap = StackTap(onCommandV: { [stackRelay] in stackRelay?.commandV() }, onPasted: { [unowned self] in stackPasted() })
+        stackRelay.setActive(false)
+        stackTap = StackTap(onCommandV: { [stackRelay, formatter] in
+            stackRelay?.commandV()
+            formatter?.commandV()
+        }, onPasted: { [unowned self] in stackPasted() })
+        updatePasteTap()
         stackPanel = StackPanelController(theme: theme)
         stackPanel.model.onStop = { [unowned self] in if stack.isOn { toggleStack() } }
         stackPanel.model.onRemove = { [unowned self] id in
@@ -209,11 +222,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func toggleStack() {
         if stack.isOn {
             stack.stop()
-            stackTap.stop()
+            stackRelay.setActive(false)
+            updatePasteTap()
             Toast.show("Paste stack off")
         } else {
             stack.start()
-            _ = stackTap.start()
+            stackRelay.setActive(true)
+            updatePasteTap()
         }
         syncStack()
     }
@@ -246,7 +261,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 guard let self else { return }
                 self.stackRelay.flush()
                 if !self.stack.isOn {
-                    self.stackTap.stop()
+                    self.stackRelay.setActive(false)
+                    self.updatePasteTap()
                     Toast.show("Paste stack done")
                 }
             }
@@ -254,6 +270,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         pendingFlush = flush
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: flush)
         syncStack()
+    }
+
+    /// The plain and original shortcuts: the clipboard in that form, then ⌘V in the app in front.
+    func pasteNow(_ v: PasteVersion) {
+        guard formatter.takeNow(v, target: NSWorkspace.shared.frontmostApplication) else {
+            Toast.show(v == .plain ? "There is no text to paste" : "The clipboard is empty")
+            return
+        }
+        Task { @MainActor in
+            let result = await Paster.pressPaste(into: nil, autoPaste: UserDefaults.standard.bool(forKey: Pref.autoPaste))
+            Chimes.shared.play(result == .pasted ? .paste : .copy)
+            if result == .copiedOnly { Toast.show("Copied as \(v.name.lowercased()). Press ⌘V to paste.") }
+        }
+    }
+
+    /// The ⌘V watcher runs while the paste stack is on, and always when ⌘V formatting is on and Accessibility allows.
+    func updatePasteTap() {
+        guard stackTap != nil else { return }   // snapshot runs make no watcher
+        let want = stack.isOn || (UserDefaults.standard.bool(forKey: Pref.formatOnCommandV) && AXIsProcessTrusted())
+        if want { _ = stackTap.start() } else { stackTap.stop() }
     }
 
     /// The optional shortcut: pastes the next stacked item without pressing ⌘V yourself.
@@ -395,6 +431,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
+        updatePasteTap()
         menu.removeAllItems()
         let open = NSMenuItem(title: shortcuts[.openShelf].map { "Open Mneme (\($0.display))" } ?? "Open Mneme", action: #selector(openShelf), keyEquivalent: "")
         open.target = self
@@ -415,6 +452,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(.separator())
         let settings = NSMenuItem(title: "Settings…", action: #selector(openSettingsFromMenu), keyEquivalent: ",")
         settings.target = self
+        settings.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: nil)
         menu.addItem(settings)
         menu.addItem(NSMenuItem(title: "Quit Mneme", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
     }

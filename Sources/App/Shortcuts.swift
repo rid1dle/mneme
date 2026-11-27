@@ -3,16 +3,18 @@ import Carbon.HIToolbox
 
 /// Everything that has a shortcut. Global ones work in any app; the rest work while the shelf is open.
 enum ShortcutAction: String, CaseIterable, Codable {
-    case openShelf, toggleStack, pasteNext
+    case openShelf, toggleStack, pasteNext, pastePlainNow, pasteOriginalNow
     case preview, edit, copy, pastePlain, rename, newPinboard, remove, deleteEverywhere
 
-    var isGlobal: Bool { self == .openShelf || self == .toggleStack || self == .pasteNext }
+    var isGlobal: Bool { [.openShelf, .toggleStack, .pasteNext, .pastePlainNow, .pasteOriginalNow].contains(self) }
 
     var title: String {
         switch self {
         case .openShelf: return "Open Mneme"
         case .toggleStack: return "Paste stack on or off"
         case .pasteNext: return "Paste next from the stack"
+        case .pastePlainNow: return "Paste as plain text in any app"
+        case .pasteOriginalNow: return "Paste with original formatting in any app"
         case .preview: return "Preview"
         case .edit: return "Edit"
         case .copy: return "Copy without pasting"
@@ -28,6 +30,8 @@ enum ShortcutAction: String, CaseIterable, Codable {
         switch self {
         case .toggleStack: return "While it is on, copy items, then press ⌘V for each one in order."
         case .pasteNext: return "Optional: ⌘V already pastes the next one when Accessibility is allowed."
+        case .pastePlainNow: return "What you copied, as text only. Mneme learns where you prefer this."
+        case .pasteOriginalNow: return "What you copied, exactly as it was, colours and fonts included."
         default: return nil
         }
     }
@@ -38,6 +42,8 @@ enum ShortcutAction: String, CaseIterable, Codable {
         case .openShelf: return c(kVK_ANSI_V, cmdKey | shiftKey)
         case .toggleStack: return c(kVK_ANSI_C, cmdKey | shiftKey)
         case .pasteNext: return nil
+        case .pastePlainNow: return c(kVK_ANSI_V, cmdKey | shiftKey | optionKey)
+        case .pasteOriginalNow: return c(kVK_ANSI_V, cmdKey | controlKey | optionKey)
         case .preview: return c(kVK_Space)
         case .edit: return c(kVK_ANSI_E, cmdKey)
         case .copy: return c(kVK_ANSI_C, cmdKey)

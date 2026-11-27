@@ -110,6 +110,12 @@ let appBridgeTests: [TestCase] = [
 ]
 
 let shelfWindowTests: [TestCase] = [
+    test("should draw the shelf's own rounded shadow instead of the system's square one") {
+        let p = ShelfPanel()
+        expect(!p.hasShadow, "the system shadow came out square around the rounded shelf")
+        expect(!p.isOpaque && p.backgroundColor == .clear, "the margin around the shelf must stay see-through")
+        expect(ShelfPanel.margin >= 16, "the shadow and the open slide need room inside the window")
+    },
     test("should let the real shelf take keys after an off-screen drawing") {
         let p = ShelfPanel()
         p.prepare(offscreen: true)

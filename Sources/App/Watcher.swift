@@ -19,6 +19,8 @@ final class Watcher {
     private var activation: NSObjectProtocol?
     private(set) var captureAllowed = Watcher.accessAllowed()
     var onAccessChange: ((Bool) -> Void)?
+    /// Each stored copy with the clipboard's change count at the time. Runs on the store queue.
+    var onCopied: (@Sendable (Capture, Int) -> Void)?
 
     init(store: Store, storeQueue: DispatchQueue, rules: @escaping () -> CaptureRules, onCapture: @escaping (Item) -> Void) {
         self.store = store
@@ -82,7 +84,7 @@ final class Watcher {
         r.recentBundleIDs = recentApps
         recentApps = Set([source?.bundleID].compactMap { $0 })
         // Reading can be slow (a big image, an app that makes its data on request): never on the main thread.
-        captureQueue.async { [store, storeQueue, onCapture] in
+        captureQueue.async { [store, storeQueue, onCapture, onCopied] in
           let snap = snapshot(of: .general, rules: r, source: source)
           storeQueue.async {
             guard case .success(let capture) = classify(snap, source: source, rules: r),
@@ -90,6 +92,7 @@ final class Watcher {
             if item.kind == .image, item.thumb == nil {
                 item = storeThumbnail(store, item, imageData: capture.representations.first { PasteType.images.contains($0.type) }?.data)
             }
+            onCopied?(capture, snap.changeCount)
             DispatchQueue.main.async { onCapture(item) }
           }
         }

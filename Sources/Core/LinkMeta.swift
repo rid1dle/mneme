@@ -32,7 +32,9 @@ private func cleanText(_ s: String) -> String {
 func decodeEntities(_ s: String) -> String {
     guard s.contains("&") else { return s }
     let named = ["amp": "&", "lt": "<", "gt": ">", "quot": "\"", "apos": "'", "nbsp": " ", "mdash": "\u{2014}", "ndash": "\u{2013}",
-                 "hellip": "\u{2026}", "rsquo": "\u{2019}", "lsquo": "\u{2018}", "rdquo": "\u{201D}", "ldquo": "\u{201C}"]
+                 "hellip": "\u{2026}", "rsquo": "\u{2019}", "lsquo": "\u{2018}", "rdquo": "\u{201D}", "ldquo": "\u{201C}",
+                 "ensp": " ", "emsp": " ", "thinsp": " ", "bull": "\u{2022}", "middot": "\u{00B7}", "rarr": "\u{2192}", "larr": "\u{2190}",
+                 "times": "\u{00D7}", "copy": "\u{00A9}", "reg": "\u{00AE}", "trade": "\u{2122}", "deg": "\u{00B0}", "zwj": "", "zwnj": "", "shy": ""]
     var out = ""
     var i = s.startIndex
     while i < s.endIndex {
