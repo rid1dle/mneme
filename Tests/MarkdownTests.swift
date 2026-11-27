@@ -118,3 +118,64 @@ let markdownTests: [TestCase] = [
         expectEqual(b.pb.changeCount, count, "the editor's copy, private types included, is not rewritten")
     },
 ]
+
+/// What VS Code's chat panel puts on the clipboard for a copied command shown as inline code.
+private let copiedCommand = "<meta charset='utf-8'><span style=\"color: rgb(230, 219, 116); font-family: Menlo, monospace; background-color: rgb(40, 41, 54);\">open ~/work/noema/build/NoemaSpike.app</span>"
+
+let terminalPasteTests: [TestCase] = [
+    test("should not wrap a copied command in backticks, but keep inline code beside other text") {
+        expect(markdownText(fromHTML: copiedCommand) == nil, markdownText(fromHTML: copiedCommand) ?? "")
+        expectEqual(markdownText(fromHTML: "<p>Run <code>ls -la</code> now</p>"), "Run `ls -la` now")
+    },
+    test("should give a terminal text with no bullets, numbers, Markdown or indents, and code shifted left as a whole") {
+        let html = "<p><strong>Steps</strong></p><ol><li>Build <code>app</code><ul><li>inner</li></ul></li><li>Run</li></ol><pre><code>    if a:\n        go()</code></pre>"
+        expectEqual(plainText(fromHTML: cleanHTML(html), bullets: .bare), "Steps\n\nBuild app\ninner\nRun\n\nif a:\n    go()")
+    },
+    test("should take off the indent all lines share and keep the rest") {
+        expectEqual(dedented("  open ~/x"), "open ~/x")
+        expectEqual(dedented("    a\n      b\n\n    c"), "a\n  b\n\nc")
+        expectEqual(dedented("a\n  b"), "a\n  b")
+        expectEqual(dedented(""), "")
+    },
+    test("should prepare a flush version of indented plain text for terminals and leave other plain text alone") {
+        let reps = [Representation(type: PasteType.plain, data: Data("  cd ~/x\n  make".utf8))]
+        let v = pasteVersions(reps, sourceBundle: "com.apple.Terminal")!
+        expectEqual(String(data: v.representations(.plain, target: .terminal)[0].data, encoding: .utf8), "cd ~/x\nmake")
+        expectEqual(v.representations(.clean, target: .rich).map(\.type), [PasteType.plain], "other apps get it as copied")
+        expect(pasteVersions([Representation(type: PasteType.plain, data: Data("cd ~/x".utf8))], sourceBundle: "com.apple.Terminal") == nil)
+    },
+    test("should treat terminal apps and a code editor's built-in terminal as terminals, and its editor as a code editor") {
+        let none = PasteLearning()
+        func v(_ p: PastePlace) -> PasteVersion { PasteRules.version(for: p, learned: none) }
+        expectEqual(v(PastePlace(sourceBundle: "a", targetBundle: "com.apple.Terminal")), .plain)
+        expectEqual(v(PastePlace(sourceBundle: "a", targetBundle: "com.mitchellh.ghostty")), .plain)
+        expectEqual(v(PastePlace(sourceBundle: "a", targetBundle: "com.microsoft.VSCode")), .markdown)
+        let term = PastePlace(sourceBundle: "com.microsoft.VSCode", targetBundle: "com.microsoft.VSCode", inTerminal: true)
+        expectEqual(term.target, .terminal)
+        expectEqual(v(term), .plain, "a copy from VS Code into its own terminal is not sent back as copied")
+        expect(term.learningKey.hasSuffix("|terminal"), "the terminal learns apart from the editor")
+        expectEqual(v(PastePlace(sourceBundle: "com.apple.Terminal", targetBundle: "com.apple.Terminal")), .plain)
+    },
+    test("should paste a copied command into a terminal without backticks and leave it as copied in the editor") {
+        let b = Board()
+        let count = b.copy(copyOf(copiedCommand, plain: "open ~/work/noema/build/NoemaSpike.app"), from: "com.microsoft.VSCode")
+        b.press(into: "com.microsoft.VSCode")
+        expectEqual(b.pb.changeCount, count, "the editor gets it as copied")
+        b.press(into: "com.apple.Terminal")
+        expectEqual(b.string(PasteType.plain), "open ~/work/noema/build/NoemaSpike.app")
+    },
+    test("should paste a chat reply into a terminal as plain lines") {
+        let b = Board()
+        b.copy(copyOf(chatReply, plain: "Done."), from: "com.microsoft.VSCode")
+        b.press(into: "com.googlecode.iterm2")
+        let t = b.string(PasteType.plain) ?? ""
+        expect(!t.contains("**") && !t.contains("`") && !t.contains("| ---") && !t.contains("1. "), t)
+        expect(t.contains("\nFixed: the mapping finding.\ninner\n"), t)
+    },
+    test("should paste indented text copied in a terminal back into it flush") {
+        let b = Board()
+        b.copy([Representation(type: PasteType.plain, data: Data("  open ~/x\n  --fast".utf8))], from: "com.apple.Terminal")
+        b.press(into: "com.apple.Terminal")
+        expectEqual(b.string(PasteType.plain), "open ~/x\n--fast")
+    },
+]

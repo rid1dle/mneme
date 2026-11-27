@@ -235,6 +235,8 @@ public enum BulletStyle: Sendable {
     case dots, dashes
     /// Markdown: `-` bullets, `**bold**`, `*italic*`, `` `code` ``, links, `#` headings, pipe tables and fenced code.
     case markdown
+    /// For a terminal: no bullets, numbers or indents, and a code block shifted left as a whole.
+    case bare
 }
 
 /// Plain text that keeps what the HTML's structure said: bullets and indents for lists, numbers for numbered lists,
@@ -244,9 +246,9 @@ public func plainText(fromHTML html: String, bullets: BulletStyle = .dots) -> St
     renderText(html, bullets).text
 }
 
-/// Markdown for a code editor, a terminal or an AI chat box, from HTML that has something only Markdown can carry
-/// (a list, heading, table, bold, italic, inline code or link). Nil for anything else, such as a code editor's own
-/// copy, which is pasted as it was copied.
+/// Markdown for a code editor or the AI chat box in it, from HTML that has something only Markdown can carry (a
+/// list, heading, table, bold, italic, link, or inline code beside other text). Nil for anything else, such as a code
+/// editor's own copy or a copied command, which are pasted as they were copied.
 public func markdownText(fromHTML html: String) -> String? {
     let r = renderText(cleanHTML(html), .markdown)
     return r.marked ? r.text : nil
@@ -269,6 +271,11 @@ private func renderText(_ html: String, _ bullets: BulletStyle) -> (text: String
     var pendingOpen = ""
     var links: [String] = []
     var marked = false
+    // Inline code marks a copy only when there is other text: a copied command alone gets no backticks.
+    var codeMarked = false
+    var inCode = 0
+    var prose = false
+    var preFrom = 0
 
     func endLine() {
         let trimmed = pre > 0 ? line : String(line.reversed().drop(while: { $0 == " " }).reversed())
@@ -286,6 +293,7 @@ private func renderText(_ html: String, _ bullets: BulletStyle) -> (text: String
         switch bullets {
         case .dots: return ["•", "◦", "▪"][min(depth, 2)]
         case .dashes, .markdown: return "-"
+        case .bare: return ""
         }
     }
     func append(_ s: String) {
@@ -295,7 +303,7 @@ private func renderText(_ html: String, _ bullets: BulletStyle) -> (text: String
         pendingOpen = ""
     }
     func close(_ marker: String) {
-        if pendingOpen.hasSuffix(marker) { pendingOpen.removeLast(marker.count) } else { line += marker; marked = true }
+        if pendingOpen.hasSuffix(marker) { pendingOpen.removeLast(marker.count) } else if marker == "`" { line += marker; codeMarked = true } else { line += marker; marked = true }
     }
 
     for token in htmlTokens(html) {
@@ -314,12 +322,17 @@ private func renderText(_ html: String, _ bullets: BulletStyle) -> (text: String
             var words = t.split(whereSeparator: { $0 == " " || $0 == "\n" || $0 == "\t" || $0 == "\r" || $0 == "\u{a0}" })
             if words.isEmpty { if !t.isEmpty { pendingSpace = true }; continue }
             if let f = t.first, f == " " || f == "\n" || f == "\t" || f == "\u{a0}" { pendingSpace = true }
+            if inCode == 0 { prose = true }
             let first = String(words.removeFirst())
             append(first)
             for w in words { line += " " + w }
             if let l = t.last, l == " " || l == "\n" || l == "\t" || l == "\u{a0}" { pendingSpace = true }
         case .start(let name, let attrs, _):
-            if md, pre == 0, let m = inlineMarkers[name] { pendingOpen += m; continue }
+            if md, pre == 0, let m = inlineMarkers[name] {
+                pendingOpen += m
+                if name == "code" { inCode += 1 }
+                continue
+            }
             if md, pre == 0, name == "a" {
                 let href = attrs["href"] ?? ""
                 let linkable = ["http", "https", "mailto"].contains(URL(string: href)?.scheme?.lowercased() ?? "")
@@ -346,6 +359,7 @@ private func renderText(_ html: String, _ bullets: BulletStyle) -> (text: String
             case "pre":
                 block()
                 if md, pre == 0 { lines.append("```") }
+                if pre == 0 { preFrom = lines.count }
                 pre += 1
             case "ul", "ol":
                 if pre > 0 { continue }
@@ -355,8 +369,10 @@ private func renderText(_ html: String, _ bullets: BulletStyle) -> (text: String
                 if !line.isEmpty { endLine() }
                 let depth = max(lists.count - 1, 0)
                 let indent = md ? String(repeating: " ", count: lists.dropLast().reduce(0) { $0 + $1.width })
-                                : String(repeating: bullets == .dots ? "    " : "  ", count: depth)
-                if var top = lists.popLast() {
+                                : String(repeating: bullets == .dots ? "    " : "  ", count: bullets == .bare ? 0 : depth)
+                if bullets == .bare {
+                    line = ""
+                } else if var top = lists.popLast() {
                     let marker = top.ordered ? "\(top.next). " : bullet(depth: depth) + " "
                     line = indent + marker
                     top.next += 1
@@ -377,7 +393,11 @@ private func renderText(_ html: String, _ bullets: BulletStyle) -> (text: String
             default: break
             }
         case .end(let name):
-            if md, pre == 0, let m = inlineMarkers[name] { close(m); continue }
+            if md, pre == 0, let m = inlineMarkers[name] {
+                close(m)
+                if name == "code" { inCode = max(inCode - 1, 0) }
+                continue
+            }
             if md, pre == 0, name == "a" {
                 guard let href = links.popLast(), !href.isEmpty else { continue }
                 if pendingOpen.hasSuffix("[") { pendingOpen.removeLast(); continue }
@@ -404,6 +424,9 @@ private func renderText(_ html: String, _ bullets: BulletStyle) -> (text: String
                     if pre == 0 {
                         if !line.isEmpty { lines.append(line) }
                         line = ""
+                        if bullets == .bare, preFrom < lines.count {
+                            lines.replaceSubrange(preFrom..., with: dedented(lines[preFrom...].joined(separator: "\n")).components(separatedBy: "\n"))
+                        }
                         if md { lines.append("```") }
                         pendingBlank = true
                     }
@@ -434,7 +457,16 @@ private func renderText(_ html: String, _ bullets: BulletStyle) -> (text: String
     if !line.isEmpty { endLine() }
     while lines.last?.isEmpty == true { lines.removeLast() }
     while lines.first?.isEmpty == true { lines.removeFirst() }
-    return (lines.joined(separator: "\n"), marked)
+    return (lines.joined(separator: "\n"), marked || (codeMarked && prose))
+}
+
+/// The text with the indent its lines share taken off, so a command or an indented block pastes from the left edge
+/// and a block of code keeps its own layout.
+public func dedented(_ text: String) -> String {
+    let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+    let blank: (Substring) -> Bool = { $0.allSatisfy { $0 == " " || $0 == "\t" || $0 == "\r" } }
+    guard let cut = lines.filter({ !blank($0) }).map({ $0.prefix { $0 == " " || $0 == "\t" }.count }).min(), cut > 0 else { return text }
+    return lines.map { blank($0) ? "" : String($0.dropFirst(cut)) }.joined(separator: "\n")
 }
 
 /// True when the HTML has a list, the one thing a source's own plain text usually loses.

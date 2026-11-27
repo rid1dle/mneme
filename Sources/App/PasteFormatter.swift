@@ -88,7 +88,8 @@ final class PasteFormatter: @unchecked Sendable {
     }
 
     private func isMarkdown(_ reps: [Representation]) -> Bool {
-        !reps.contains { PasteType.rich.contains($0.type) }
+        guard !reps.contains(where: { PasteType.rich.contains($0.type) }) else { return false }
+        return reps.first { $0.type == PasteType.plain }.flatMap { String(data: $0.data, encoding: .utf8) }.map(looksLikeMarkdown) ?? false
     }
 
     // MARK: paste stack
@@ -129,8 +130,8 @@ final class PasteFormatter: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         // Unknown app in front: nowhere to suit, leave the clipboard as it is.
         guard var m = managed, pasteboard.changeCount == m.changeCount, front.bundle != nil else { return }
-        let place = PastePlace(sourceBundle: m.source, targetBundle: front.bundle, windowTitle: title(front.bundle, front.pid))
-        let v = m.reformats ? PasteRules.version(for: place, learned: learning) : .original
+        let place = place(m.source, front.bundle, front.pid)
+        let v = m.versions.effective(m.reformats ? PasteRules.version(for: place, learned: learning) : .original)
         if v != m.current || (v == .plain && m.bullets != place.target.bullets) {
             write(&m, v, target: place.target)
             managed = m
@@ -165,7 +166,7 @@ final class PasteFormatter: @unchecked Sendable {
             managed = m
             return m.changeCount
         }
-        let place = PastePlace(sourceBundle: m.source, targetBundle: target.bundleIdentifier, windowTitle: title(target.bundleIdentifier, target.processIdentifier))
+        let place = place(m.source, target.bundleIdentifier, target.processIdentifier)
         let smart = defaults.bool(forKey: Pref.formatFromMneme) && m.reformats
         let v = chosen ?? (smart ? PasteRules.version(for: place, learned: learning) : .original)
         write(&m, v, target: place.target)
@@ -199,7 +200,7 @@ final class PasteFormatter: @unchecked Sendable {
                         reformats: built != nil, markdown: false, source: nil, sourceName: nil, changeCount: snap.changeCount, current: .original)
         }
         if v == .plain, m.versions.plainDots.isEmpty { return false }
-        let place = PastePlace(sourceBundle: m.source, targetBundle: targetBundle, windowTitle: title(targetBundle, pid))
+        let place = place(m.source, targetBundle, pid)
         write(&m, v, target: place.target)
         managed = m
         learn(v, place, targetName: targetName)
@@ -232,6 +233,23 @@ final class PasteFormatter: @unchecked Sendable {
 
     /// A browser's front window title, which names the site (Gmail, Google Sheets). Asked with a short timeout: a
     /// busy browser must not hold up the ⌘V.
+    private func place(_ source: String?, _ bundle: String?, _ pid: pid_t) -> PastePlace {
+        PastePlace(sourceBundle: source, targetBundle: bundle, windowTitle: title(bundle, pid), inTerminal: inTerminal(bundle, pid))
+    }
+
+    /// True when a code editor's built-in terminal has the keyboard: its focused element is xterm.js's input field.
+    private func inTerminal(_ bundle: String?, _ pid: pid_t) -> Bool {
+        guard let bundle, PasteRules.editorsWithTerminal.contains(bundle), pid > 0, AXIsProcessTrusted() else { return false }
+        let app = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(app, 0.1)
+        var focused: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(app, kAXFocusedUIElementAttribute as CFString, &focused) == .success, let focused,
+              CFGetTypeID(focused) == AXUIElementGetTypeID() else { return false }
+        var classes: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(focused as! AXUIElement, "AXDOMClassList" as CFString, &classes) == .success else { return false }
+        return (classes as? [String])?.contains("xterm-helper-textarea") == true
+    }
+
     private func title(_ bundle: String?, _ pid: pid_t) -> String? {
         guard let bundle, PasteRules.browsers.contains(bundle), pid > 0, AXIsProcessTrusted() else { return nil }
         let app = AXUIElementCreateApplication(pid)

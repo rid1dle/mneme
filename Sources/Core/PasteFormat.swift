@@ -26,8 +26,10 @@ public enum PasteVersion: String, Codable, CaseIterable, Sendable {
 public enum PasteTarget: String, Sendable {
     /// Excel, Numbers, Google Sheets: colours and cell styling are part of the content there.
     case spreadsheet
-    /// Code editors and terminals: Markdown.
+    /// Code editors and the AI chat boxes in them: Markdown.
     case code
+    /// Terminals, including the one inside a code editor: text only, no bullets or indents.
+    case terminal
     /// Chats that take text only: text with bullet characters.
     case plainChat
     /// Mail, documents, notes, chat apps that read formatting: structure without looks.
@@ -37,12 +39,18 @@ public enum PasteTarget: String, Sendable {
         switch self {
         case .spreadsheet: return .original
         case .code: return .markdown
-        case .plainChat: return .plain
+        case .terminal, .plainChat: return .plain
         case .rich: return .clean
         }
     }
 
-    public var bullets: BulletStyle { self == .code ? .dashes : .dots }
+    public var bullets: BulletStyle {
+        switch self {
+        case .code: return .dashes
+        case .terminal: return .bare
+        default: return .dots
+        }
+    }
 }
 
 /// The app (and, in a browser, the site) a paste goes into, and where the copy came from.
@@ -50,8 +58,10 @@ public struct PastePlace: Equatable, Sendable {
     public var sourceBundle: String?
     public var targetBundle: String?
     public var windowTitle: String?
-    public init(sourceBundle: String?, targetBundle: String?, windowTitle: String? = nil) {
-        self.sourceBundle = sourceBundle; self.targetBundle = targetBundle; self.windowTitle = windowTitle
+    /// The paste goes into a code editor's built-in terminal.
+    public var inTerminal: Bool
+    public init(sourceBundle: String?, targetBundle: String?, windowTitle: String? = nil, inTerminal: Bool = false) {
+        self.sourceBundle = sourceBundle; self.targetBundle = targetBundle; self.windowTitle = windowTitle; self.inTerminal = inTerminal
     }
 
     /// For a browser: the site from the window title ("Inbox - Gmail" is Gmail). Nil for other apps.
@@ -62,11 +72,11 @@ public struct PastePlace: Equatable, Sendable {
         return last.isEmpty ? nil : String(last.prefix(40))
     }
 
-    public var target: PasteTarget { PasteRules.target(bundle: targetBundle, site: site) }
+    public var target: PasteTarget { inTerminal ? .terminal : PasteRules.target(bundle: targetBundle, site: site) }
 
     /// The key the user's choices are learned under: where from, where to.
     public var learningKey: String {
-        "\(sourceBundle ?? "?")>\(targetBundle ?? "?")" + (site.map { "|\($0)" } ?? "")
+        "\(sourceBundle ?? "?")>\(targetBundle ?? "?")" + (site.map { "|\($0)" } ?? "") + (inTerminal ? "|terminal" : "")
     }
 }
 
@@ -91,11 +101,22 @@ public enum PasteRules {
 
     static let codeApps: Set<String> = [
         "com.microsoft.VSCode", "com.microsoft.VSCodeInsiders", "com.todesktop.230313mzl4w4u92", "com.exafunction.windsurf",
-        "com.apple.dt.Xcode", "com.apple.Terminal", "com.googlecode.iterm2", "com.mitchellh.ghostty", "dev.warp.Warp-Stable",
-        "dev.zed.Zed", "com.sublimetext.4", "com.sublimetext.3", "net.kovidgoyal.kitty", "io.alacritty",
-        "com.github.wez.wezterm", "com.panic.Nova", "com.barebones.bbedit", "org.vim.MacVim", "com.vscodium",
+        "com.apple.dt.Xcode", "dev.zed.Zed", "com.sublimetext.4", "com.sublimetext.3", "com.panic.Nova", "com.barebones.bbedit",
+        "org.vim.MacVim", "com.vscodium",
     ]
     static let codePrefixes = ["com.jetbrains."]
+
+    static let terminals: Set<String> = [
+        "com.apple.Terminal", "com.googlecode.iterm2", "com.mitchellh.ghostty", "dev.warp.Warp-Stable", "net.kovidgoyal.kitty",
+        "io.alacritty", "org.alacritty", "com.github.wez.wezterm", "co.zeit.hyper", "com.raphaelamorim.rio",
+    ]
+
+    /// Code editors whose built-in terminal can be told apart from the editor by the focused element (VS Code and its
+    /// forks: xterm.js's input field).
+    public static let editorsWithTerminal: Set<String> = [
+        "com.microsoft.VSCode", "com.microsoft.VSCodeInsiders", "com.todesktop.230313mzl4w4u92", "com.exafunction.windsurf",
+        "com.vscodium",
+    ]
 
     static let plainChats: Set<String> = [
         "net.whatsapp.WhatsApp", "desktop.WhatsApp", "ru.keepcoder.Telegram", "org.telegram.desktop", "com.apple.MobileSMS",
@@ -111,6 +132,7 @@ public enum PasteRules {
             return .rich
         }
         if spreadsheets.contains(bundle) { return .spreadsheet }
+        if terminals.contains(bundle) { return .terminal }
         if codeApps.contains(bundle) || codePrefixes.contains(where: bundle.hasPrefix) { return .code }
         if plainChats.contains(bundle) { return .plainChat }
         return .rich
@@ -131,11 +153,11 @@ public enum PasteRules {
     }
 
     /// Back into the app the copy came from. Not for a code editor or terminal: a copy from its chat or preview
-    /// panel has a list or table that only Markdown keeps, and its own editor copies have none, so they paste as
-    /// copied anyway.
+    /// panel has a list or table that only Markdown keeps (its own editor copies have none, so they paste as copied
+    /// anyway), and a terminal takes text without indents even from itself.
     static func backHome(_ place: PastePlace) -> Bool {
         guard let s = place.sourceBundle, s == place.targetBundle, place.site == nil else { return false }
-        return place.target != .code
+        return place.target != .code && place.target != .terminal
     }
 }
 
@@ -178,13 +200,29 @@ public struct PasteVersions: Sendable {
     public var plainDashes: String
     /// Nil when the copy has nothing only Markdown carries; the original is pasted instead.
     public var markdown: String? = nil
+    /// For a terminal: no bullets, Markdown or indents. Nil: the copy's plain text with dashes.
+    public var bare: String? = nil
+
+    /// The version that is really pasted: the original when the asked one would be the same as the copy.
+    public func effective(_ v: PasteVersion) -> PasteVersion {
+        switch v {
+        case .markdown where markdown == nil: return .original
+        case .clean where clean == original: return .original
+        default: return v
+        }
+    }
 
     public func representations(_ v: PasteVersion, target: PasteTarget) -> [Representation] {
         switch v {
         case .original: return original
         case .clean: return clean
         case .plain:
-            let text = target.bullets == .dashes ? plainDashes : plainDots
+            let text: String
+            switch target.bullets {
+            case .dashes, .markdown: text = plainDashes
+            case .bare: text = bare ?? plainDashes
+            case .dots: text = plainDots
+            }
             return [Representation(index: 0, type: PasteType.plain, data: Data(text.utf8))]
         case .markdown:
             guard let markdown else { return original }
@@ -196,8 +234,8 @@ public struct PasteVersions: Sendable {
 /// Bigger HTML than this is pasted as it is (a whole web page, a huge table): cleaning it at ⌘V would be noticeable.
 public let maxFormattedHTMLBytes = 2_000_000
 
-/// The versions for a copy, or nil when there is nothing to improve: no HTML, rich text or Markdown-looking text,
-/// several clipboard items, files or images, or a spreadsheet's copy. `richTextToHTML` reads RTF (true: RTFD) into
+/// The versions for a copy, or nil when there is nothing to improve: no HTML, rich text, Markdown-looking or indented
+/// text, several clipboard items, files or images, or a spreadsheet's copy. `richTextToHTML` reads RTF (true: RTFD) into
 /// clean HTML; it needs AppKit, so the app passes it in.
 public func pasteVersions(_ reps: [Representation], sourceBundle: String?, richTextToHTML: ((Data, Bool) -> String?)? = nil) -> PasteVersions? {
     guard PasteRules.managesCopy(from: sourceBundle), !reps.isEmpty, reps.allSatisfy({ $0.index == 0 }) else { return nil }
@@ -212,7 +250,8 @@ public func pasteVersions(_ reps: [Representation], sourceBundle: String?, richT
         let dashes = list || plain == nil ? plainText(fromHTML: html, bullets: .dashes) : plain!
         return PasteVersions(original: reps,
                              clean: [Representation(type: PasteType.html, data: Data(clean.utf8)), Representation(type: PasteType.plain, data: Data(dots.utf8))],
-                             plainDots: dots, plainDashes: dashes, markdown: markdownText(fromHTML: html))
+                             plainDots: dots, plainDashes: dashes, markdown: markdownText(fromHTML: html),
+                             bare: plainText(fromHTML: clean, bullets: .bare))
     }
     if let rich = reps.first(where: { $0.type == PasteType.rtfd }) ?? reps.first(where: { $0.type == PasteType.rtf }) {
         guard rich.data.count <= maxFormattedHTMLBytes, let html = richTextToHTML?(rich.data, rich.type == PasteType.rtfd) else { return nil }
@@ -221,13 +260,20 @@ public func pasteVersions(_ reps: [Representation], sourceBundle: String?, richT
         let dashes = list || plain == nil ? plainText(fromHTML: html, bullets: .dashes) : plain!
         return PasteVersions(original: reps,
                              clean: [Representation(type: PasteType.html, data: Data(html.utf8)), Representation(type: PasteType.plain, data: Data(dots.utf8))],
-                             plainDots: dots, plainDashes: dashes, markdown: markdownText(fromHTML: html))
+                             plainDots: dots, plainDashes: dashes, markdown: markdownText(fromHTML: html),
+                             bare: plainText(fromHTML: html, bullets: .bare))
     }
-    guard let plain, looksLikeMarkdown(plain) else { return nil }
+    guard let plain else { return nil }
+    guard looksLikeMarkdown(plain) else {
+        // Indented text (a command copied from a terminal's output) only changes for a terminal.
+        let flush = dedented(plain)
+        guard flush != plain else { return nil }
+        return PasteVersions(original: reps, clean: reps, plainDots: plain, plainDashes: plain, bare: flush)
+    }
     let html = markdownToHTML(plain)
     return PasteVersions(original: reps,
                          clean: [Representation(type: PasteType.html, data: Data(html.utf8)), Representation(type: PasteType.plain, data: Data(plain.utf8))],
-                         plainDots: plain, plainDashes: plain, markdown: plain)
+                         plainDots: plain, plainDashes: plain, markdown: plain, bare: plainText(fromHTML: html, bullets: .bare))
 }
 
 /// One line of the paste log: no content, only where from, where to, what was given and why.

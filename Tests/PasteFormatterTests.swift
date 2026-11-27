@@ -50,7 +50,7 @@ let pasteFormatterTests: [TestCase] = [
         r.press(into: "com.microsoft.Excel")
         expectEqual(r.string(PasteType.html), richCopy, "the spreadsheet gets the original")
         r.press(into: "com.apple.Terminal")
-        expectEqual(r.string(PasteType.plain), "Plan:\n\n- **one**\n- two")
+        expectEqual(r.string(PasteType.plain), "Plan:\n\none\ntwo")
         expect(!r.types.contains(PasteType.html))
         r.press(into: "net.whatsapp.WhatsApp")
         expectEqual(r.string(PasteType.plain), "Plan:\n\n• one\n• two", "a chat gets dots, not the terminal's dashes")
@@ -160,7 +160,7 @@ let pasteFormatterTests: [TestCase] = [
             expectEqual(count, r.pb.changeCount)
             expectEqual(r.string(PasteType.html), richCopy)
             r.press(into: "com.apple.Terminal")
-            expectEqual(r.string(PasteType.plain), "Plan:\n\n- **one**\n- two")
+            expectEqual(r.string(PasteType.plain), "Plan:\n\none\ntwo")
         }
     },
 ]
@@ -194,14 +194,14 @@ let pasteFormatterGapTests: [TestCase] = [
         let html = htmlFromRichText(richTextCopy(), rtfd: false) ?? ""
         expectEqual(html, "<p><strong>Title</strong></p><ul><li><em>one</em><ul><li>inner</li></ul></li><li><a href=\"https://example.com\">site</a></li></ul><p>End</p>")
     },
-    test("should give mail clean formatting and a terminal bullets from a Pages or TextEdit copy") {
+    test("should give mail clean formatting and a terminal plain lines from a Pages or TextEdit copy") {
         let r = Rig()
         r.copy([Representation(type: PasteType.rtf, data: richTextCopy()), Representation(type: PasteType.plain, data: Data("Title\n\tone".utf8))], from: "com.apple.TextEdit")
         r.press(into: "com.apple.mail")
         expect(r.string(PasteType.html)?.contains("<ul><li><em>one</em>") == true, r.string(PasteType.html) ?? "")
         expect(!r.types.contains(PasteType.rtf), "the rich text with its colours is not offered to mail")
         r.press(into: "com.apple.Terminal")
-        expectEqual(r.string(PasteType.plain), "**Title**\n\n- *one*\n  - inner\n- [site](https://example.com)\n\nEnd")
+        expectEqual(r.string(PasteType.plain), "Title\n\none\ninner\nsite\n\nEnd")
         r.press(into: "com.microsoft.Excel")
         expect(r.types.contains(PasteType.rtf), "a spreadsheet gets the original")
     },
@@ -219,7 +219,7 @@ let pasteFormatterGapTests: [TestCase] = [
         let r = Rig()
         r.formatter.setFront(bundle: "com.apple.Terminal", name: "Terminal", pid: 0)
         r.copy(rich(), from: "com.microsoft.VSCode")
-        expectEqual(r.string(PasteType.plain), "Plan:\n\n- **one**\n- two")
+        expectEqual(r.string(PasteType.plain), "Plan:\n\none\ntwo")
     },
     test("should format paste stack items by where they were copied") {
         let r = Rig()

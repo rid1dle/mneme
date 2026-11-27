@@ -112,15 +112,15 @@ private func text(_ r: [Representation], _ type: String) -> String? {
 }
 
 let pasteFormatTests: [TestCase] = [
-    test("should give spreadsheets the original, code editors Markdown, chats plain text, and mail or docs clean formatting") {
+    test("should give spreadsheets the original, code editors Markdown, terminals and chats plain text, and mail or docs clean formatting") {
         let none = PasteLearning()
         func v(_ target: String, _ title: String? = nil) -> PasteVersion {
             PasteRules.version(for: PastePlace(sourceBundle: "com.microsoft.VSCode", targetBundle: target, windowTitle: title), learned: none)
         }
         expectEqual(v("com.microsoft.Excel"), .original)
         expectEqual(v("com.apple.iWork.Numbers"), .original)
-        expectEqual(v("com.apple.Terminal"), .markdown)
-        expectEqual(v("com.mitchellh.ghostty"), .markdown)
+        expectEqual(v("com.apple.Terminal"), .plain)
+        expectEqual(v("com.mitchellh.ghostty"), .plain)
         expectEqual(v("net.whatsapp.WhatsApp"), .plain)
         expectEqual(v("com.apple.mail"), .clean)
         expectEqual(v("com.tinyspeck.slackmacgap"), .clean)
