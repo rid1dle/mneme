@@ -50,29 +50,29 @@ survive rebuilds.
 
 ## Updates
 
-Mneme 0.4 and later keep themselves up to date. At launch and every six hours Mneme reads the newest release's
-`update.json`, downloads a newer version, checks its size, SHA-256 and Ed25519 signature against the release key built
-into the app, unpacks it, checks the app inside (bundle id, version, code signature), then swaps it in and reopens:
-on its own while the shelf is closed and the paste stack is off, or from the menu ("Restart to Update to …") when
-Settings → General → Install updates automatically is off. Permissions carry over: the app is signed with a
-requirement on its bundle id, not on each build.
+Mneme keeps itself up to date from `https://updates.riddlelab.dev/mneme/update.json`, served from our own server (no
+GitHub releases). At launch and every six hours it reads `update.json`, downloads a newer version, checks its size,
+SHA-256 and Ed25519 signature against the release key built into the app, unpacks it, checks the app inside (bundle
+id, version, code signature), then swaps it in and reopens: on its own while the shelf is closed and the paste stack
+is off, or from the menu ("Restart to Update to …") when Settings → General → Install updates automatically is off.
+Permissions carry over: the app is signed with a requirement on its bundle id, not on each build. Copies older than
+0.4 do not update themselves; install 0.4 once by hand.
 
 Mneme must run from a folder it can write to (`~/Applications` or `/Applications`), not straight from Downloads.
 
 ## Releasing
 
 ```sh
-scripts/release 0.5 "What changed, in a sentence or two"
+Kit/scripts/release --dry-run 0.5 "What changed"   # build, sign and show the manifest; nothing leaves the Mac
+Kit/scripts/release 0.5 "What changed, in a sentence or two"
 ```
 
-It sets the version, runs the tests, commits, tags `v0.5` and pushes. `.github/workflows/release.yml` then tests,
-builds, zips and signs on a macOS runner and publishes the GitHub release with the zip and `update.json`; every copy
-of Mneme finds it within six hours. Run the workflow by hand (Actions → Release → Run workflow) for a dry run that
-publishes nothing and keeps the files as an artifact. `./build.sh release` makes the same files locally.
+It sets the version, runs the tests, builds, zips and signs on this Mac, uploads to homelab, swaps `update.json` in
+last, then commits, tags `v0.5` and pushes. Every copy of Mneme finds it within six hours. The updater, the release
+command and the key handling live in the shared kit (`Kit/`, [polycurio/kit](https://github.com/polycurio/kit)).
 
-The release key: the public half is `UpdateFeed.publicKey` in `Sources/Core/Update.swift`; the private half is the
-repository secret `MNEME_UPDATE_KEY`, backed up at `~/.config/mneme/update-signing-key` (never commit it). Without it
-no update can be signed: copies of Mneme would need a manual reinstall of a build with a new public key.
+The release key: the public half is `UpdateApp.releaseKey` in `Kit/Core/Update.swift`; the private half is at
+`~/.config/polycurio/update-signing-key` (never commit it). Without it no update can be signed.
 
 ## Where things are
 
@@ -89,8 +89,9 @@ Needs the Command Line Tools only (no Xcode, no SwiftPM).
 ./build.sh            # build/Mneme.app
 ./build.sh test       # unit tests (optional name filter: ./build.sh test Capture)
 ./build.sh install    # build and copy to ~/Applications/Mneme.app
-./build.sh release    # build/release: the zip and a signed update.json
 ```
+
+Clone with `git clone --recurse-submodules` (or run `git submodule update --init` once) to get `Kit/`.
 
 Development helpers (they never touch your real history):
 

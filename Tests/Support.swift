@@ -1,5 +1,14 @@
 import Foundation
 
+/// A fresh folder for one test, with symlinks resolved (/var -> /private/var) so paths compare exactly.
+func makeSandbox() -> URL {
+    let base = FileManager.default.temporaryDirectory.appendingPathComponent("mneme-tests-\(UUID().uuidString)")
+    try! FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+    let real = realpath(base.path, nil)!
+    defer { free(real) }
+    return URL(fileURLWithPath: String(cString: real), isDirectory: true)
+}
+
 func makeStore() throws -> Store { try Store(directory: makeSandbox().appendingPathComponent("store")) }
 
 func tableNames(_ store: Store) throws -> Set<String> {

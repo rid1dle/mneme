@@ -90,7 +90,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var stackTap: StackTap!
     private var stackRelay: StackRelay!
     private(set) var formatter: PasteFormatter!
-    private(set) lazy var updater = Updater()
+    private(set) lazy var updater = Updater(app: .polycurio(name: "Mneme", slug: "mneme", bundleID: "local.mneme"))
     private var pendingFlush: DispatchWorkItem?
     private var stackPanel: StackPanelController!
     var shortcuts = Shortcuts.load()
