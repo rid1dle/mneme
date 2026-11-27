@@ -1,9 +1,9 @@
 import AppKit
 import ApplicationServices
 
-/// Gives each app the form of a text copy that suits it (PasteRules), at the moment of the paste: on ⌘V (from the
-/// key watcher's thread, before the key reaches the app), on a paste from the shelf, and on the plain and original
-/// shortcuts. The clipboard is only rewritten when the app in front should get a different form than the one on it.
+/// Gives each app the form of a text copy that suits it (PasteRules): when an app comes to the front (so Edit >
+/// Paste gets it too), on ⌘V (from the key watcher's thread, before the key reaches the app, which also covers a
+/// browser tab switch), on a paste from the shelf or the paste stack, and on the plain and original shortcuts. The clipboard is only rewritten when the app in front should get a different form than the one on it.
 ///
 /// The copy's forms are built once, off the main thread, when it is copied. Called from the main thread and the key
 /// watcher's thread, so its state is locked.
@@ -47,8 +47,16 @@ final class PasteFormatter: @unchecked Sendable {
     func watchFrontApp() {
         setFront(NSWorkspace.shared.frontmostApplication)
         activation = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { [weak self] note in
-            self?.setFront(note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication)
+            let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+            self?.frontMoved(bundle: app?.bundleIdentifier, name: app?.localizedName, pid: app?.processIdentifier ?? 0)
         }
+    }
+
+    /// Another app came to the front: the clipboard is put in its form now, so a paste from its Edit menu or a right
+    /// click gets it too, not only ⌘V.
+    func frontMoved(bundle: String?, name: String?, pid: pid_t) {
+        setFront(bundle: bundle, name: name, pid: pid)
+        apply(via: nil)
     }
 
     private func setFront(_ app: NSRunningApplication?) {
@@ -65,16 +73,46 @@ final class PasteFormatter: @unchecked Sendable {
     /// A new copy was stored. Its forms are built off the main thread; until then ⌘V pastes it as copied.
     func copied(_ reps: [Representation], source: SourceApp?, changeCount: Int) {
         queue.async { [self] in
-            let versions = pasteVersions(reps, sourceBundle: source?.bundleID)
-            lock.lock(); defer { lock.unlock() }
-            guard let versions else {
-                if managed.map({ $0.changeCount <= changeCount }) ?? true { managed = nil }
-                return
+            let versions = pasteVersions(reps, sourceBundle: source?.bundleID, richTextToHTML: htmlFromRichText)
+            lock.lock()
+            if let versions {
+                managed = Managed(versions: versions, reformats: true, markdown: isMarkdown(reps), source: source?.bundleID,
+                                  sourceName: source?.name, changeCount: changeCount, current: .original)
+            } else if managed.map({ $0.changeCount <= changeCount }) ?? true {
+                managed = nil
             }
-            let markdown = !reps.contains { $0.type == PasteType.html }
-            managed = Managed(versions: versions, reformats: true, markdown: markdown, source: source?.bundleID,
-                              sourceName: source?.name, changeCount: changeCount, current: .original)
+            lock.unlock()
+            // The user may already be in the app they will paste into.
+            if versions != nil { apply(via: nil) }
         }
+    }
+
+    private func isMarkdown(_ reps: [Representation]) -> Bool {
+        !reps.contains { PasteType.rich.contains($0.type) }
+    }
+
+    // MARK: paste stack
+
+    private var stackSources: [String: SourceApp] = [:]
+
+    /// Where each stacked item was copied, by content hash, so the stack's items get the same treatment.
+    func setStackSources(_ sources: [String: SourceApp]) {
+        lock.lock(); defer { lock.unlock() }
+        stackSources = sources
+    }
+
+    /// The paste stack just put an item on the clipboard (main thread or the key watcher's thread): it is formatted
+    /// like any copy, at once for the app in front.
+    func adoptStackItem(_ reps: [Representation], changeCount: Int) {
+        lock.lock()
+        let source = stackSources[contentHash(reps)]
+        lock.unlock()
+        let versions = pasteVersions(reps, sourceBundle: source?.bundleID, richTextToHTML: htmlFromRichText)
+        lock.lock()
+        managed = versions.map { Managed(versions: $0, reformats: true, markdown: isMarkdown(reps), source: source?.bundleID,
+                                         sourceName: source?.name, changeCount: changeCount, current: .original) }
+        lock.unlock()
+        apply(via: nil)
     }
 
     /// Waits for copies being prepared (tests).
@@ -83,17 +121,21 @@ final class PasteFormatter: @unchecked Sendable {
     // MARK: ⌘V
 
     /// The key watcher's thread, before the ⌘V reaches the app.
-    func commandV() {
+    func commandV() { apply(via: "cmd-v") }
+
+    /// Puts the copy in the form for the app in front, if it is not already; `via` names a paste to log.
+    private func apply(via: String?) {
         guard defaults.bool(forKey: Pref.formatOnCommandV) else { return }
         lock.lock(); defer { lock.unlock() }
-        guard var m = managed, pasteboard.changeCount == m.changeCount else { return }
+        // Unknown app in front: nowhere to suit, leave the clipboard as it is.
+        guard var m = managed, pasteboard.changeCount == m.changeCount, front.bundle != nil else { return }
         let place = PastePlace(sourceBundle: m.source, targetBundle: front.bundle, windowTitle: title(front.bundle, front.pid))
         let v = m.reformats ? PasteRules.version(for: place, learned: learning) : .original
         if v != m.current || (v == .plain && m.bullets != place.target.bullets) {
             write(&m, v, target: place.target)
             managed = m
         }
-        log(place, v, reason: m.reformats ? pasteReason(place, learned: learning) : "not-reformatted", via: "cmd-v", markdown: m.markdown)
+        if let via { log(place, v, reason: m.reformats ? pasteReason(place, learned: learning) : "not-reformatted", via: via, markdown: m.markdown) }
     }
 
     /// Locked.
@@ -111,10 +153,10 @@ final class PasteFormatter: @unchecked Sendable {
     /// form the user chose, which is learned for that place. Main thread. Returns the clipboard's change count.
     @MainActor
     func put(_ reps: [Representation], text: String?, source: SourceApp?, target: NSRunningApplication?, as chosen: PasteVersion?) -> Int {
-        let built = pasteVersions(reps, sourceBundle: source?.bundleID)
+        let built = pasteVersions(reps, sourceBundle: source?.bundleID, richTextToHTML: htmlFromRichText)
         let plain = text ?? reps.first { $0.type == PasteType.plain }.flatMap { String(data: $0.data, encoding: .utf8) } ?? ""
         let versions = built ?? PasteVersions(original: reps, clean: reps, plainDots: plain, plainDashes: plain)
-        let markdown = built != nil && !reps.contains { $0.type == PasteType.html }
+        let markdown = built != nil && isMarkdown(reps)
         var m = Managed(versions: versions, reformats: built != nil, markdown: markdown, source: source?.bundleID,
                         sourceName: source?.name, changeCount: -1, current: .original)
         lock.lock(); defer { lock.unlock() }
@@ -151,7 +193,7 @@ final class PasteFormatter: @unchecked Sendable {
             let snap = snapshot(of: pasteboard)
             let reps = (snap.items.first ?? [:]).map { Representation(index: 0, type: $0.key, data: $0.value) }.sorted { $0.type < $1.type }
             guard !reps.isEmpty else { return false }
-            let built = pasteVersions(reps, sourceBundle: nil)
+            let built = pasteVersions(reps, sourceBundle: nil, richTextToHTML: htmlFromRichText)
             let plain = reps.first { $0.type == PasteType.plain }.flatMap { String(data: $0.data, encoding: .utf8) } ?? ""
             m = Managed(versions: built ?? PasteVersions(original: reps, clean: reps, plainDots: plain, plainDashes: plain),
                         reformats: built != nil, markdown: false, source: nil, sourceName: nil, changeCount: snap.changeCount, current: .original)

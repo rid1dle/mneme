@@ -178,9 +178,10 @@ public struct PasteVersions: Sendable {
 /// Bigger HTML than this is pasted as it is (a whole web page, a huge table): cleaning it at ⌘V would be noticeable.
 public let maxFormattedHTMLBytes = 2_000_000
 
-/// The versions for a copy, or nil when there is nothing to improve: no HTML and no Markdown-looking text, several
-/// clipboard items, files or images, or a spreadsheet's copy.
-public func pasteVersions(_ reps: [Representation], sourceBundle: String?) -> PasteVersions? {
+/// The versions for a copy, or nil when there is nothing to improve: no HTML, rich text or Markdown-looking text,
+/// several clipboard items, files or images, or a spreadsheet's copy. `richTextToHTML` reads RTF (true: RTFD) into
+/// clean HTML; it needs AppKit, so the app passes it in.
+public func pasteVersions(_ reps: [Representation], sourceBundle: String?, richTextToHTML: ((Data, Bool) -> String?)? = nil) -> PasteVersions? {
     guard PasteRules.managesCopy(from: sourceBundle), !reps.isEmpty, reps.allSatisfy({ $0.index == 0 }) else { return nil }
     let types = Set(reps.map(\.type))
     if types.contains(PasteType.fileURL) || !types.isDisjoint(with: PasteType.images) { return nil }
@@ -195,7 +196,16 @@ public func pasteVersions(_ reps: [Representation], sourceBundle: String?) -> Pa
                              clean: [Representation(type: PasteType.html, data: Data(clean.utf8)), Representation(type: PasteType.plain, data: Data(dots.utf8))],
                              plainDots: dots, plainDashes: dashes)
     }
-    guard !types.contains(PasteType.rtf), !types.contains(PasteType.rtfd), let plain, looksLikeMarkdown(plain) else { return nil }
+    if let rich = reps.first(where: { $0.type == PasteType.rtfd }) ?? reps.first(where: { $0.type == PasteType.rtf }) {
+        guard rich.data.count <= maxFormattedHTMLBytes, let html = richTextToHTML?(rich.data, rich.type == PasteType.rtfd) else { return nil }
+        let list = htmlHasList(html)
+        let dots = list || plain == nil ? plainText(fromHTML: html, bullets: .dots) : plain!
+        let dashes = list || plain == nil ? plainText(fromHTML: html, bullets: .dashes) : plain!
+        return PasteVersions(original: reps,
+                             clean: [Representation(type: PasteType.html, data: Data(html.utf8)), Representation(type: PasteType.plain, data: Data(dots.utf8))],
+                             plainDots: dots, plainDashes: dashes)
+    }
+    guard let plain, looksLikeMarkdown(plain) else { return nil }
     let html = markdownToHTML(plain)
     return PasteVersions(original: reps,
                          clean: [Representation(type: PasteType.html, data: Data(html.utf8)), Representation(type: PasteType.plain, data: Data(plain.utf8))],

@@ -16,10 +16,12 @@ shortcut changeable. About 22 MB of memory when idle.
   app; drag cards to reorder them inside a pinboard.
 - **Paste stack:** **⇧⌘C**, copy several things, then press **⌘V** for each: they paste in the order copied. A small
   panel shows the order; drag to reorder, ✕ to remove.
-- **Formatting that suits where you paste:** on ⌘V (and on pastes from the shelf) a text copy is given in the form
-  for the app, or the site in a browser, in front: spreadsheets get it as copied, mail, documents and chat apps get its
+- **Formatting that suits where you paste:** when an app comes to the front, on ⌘V, and on pastes from the shelf or
+  the paste stack, a text copy is put in the form for the app, or the site in a browser, in front (so Edit > Paste
+  and a right click get it too): spreadsheets get it as copied, mail, documents and chat apps get its
   structure without the source's colours and fonts, code editors and terminals get plain text with `- ` bullets, and
-  plain-text chats get `•` bullets. Markdown-looking plain text becomes formatted text where formatting is taken.
+  plain-text chats get `•` bullets. Markdown-looking plain text, and rich text from Word, Pages, TextEdit or Notes,
+  becomes clean formatted text where formatting is taken.
   ⌥⇧⌘V pastes plain text and ⌃⌥⌘V the original anywhere (⇧↩ and ⌥↩ in the shelf); choosing the same way twice for
   one place makes it the rule there. Settings → Pasting; a content-free log of pastes is kept in `paste-log.jsonl`.
 - **Sound:** a soft sound when a copy is saved and another when Mneme pastes. Settings → Sound picks each sound and

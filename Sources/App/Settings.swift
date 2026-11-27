@@ -297,12 +297,12 @@ struct PastingTab: View {
     var body: some View {
         Form {
             Section {
-                Toggle("Fix formatting when I press ⌘V", isOn: $settings.formatOnCommandV)
+                Toggle("Fix formatting when I paste in any app", isOn: $settings.formatOnCommandV)
                     .onChange(of: settings.formatOnCommandV) { settings.app?.updatePasteTap() }
                 Toggle("Fix formatting when I paste from Mneme", isOn: $settings.formatFromMneme)
                 Text(settings.accessibility
-                     ? "Text you copy is pasted in the form that suits the app, or the site in a browser, it goes into. Plain text that is written as Markdown becomes formatted text in apps that take formatting."
-                     : "⌘V needs Accessibility, which is off: allow it in General.")
+                     ? "Text you copy is pasted in the form that suits the app, or the site in a browser, it goes into: with ⌘V, Edit > Paste, a right click or the paste stack. Plain text written as Markdown, and rich text from Word, Pages or Notes, become clean formatted text in apps that take formatting."
+                     : "Accessibility is off, so this works only when you switch apps and not on ⌘V inside a browser: allow it in General.")
                     .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             Section("What each place gets") {

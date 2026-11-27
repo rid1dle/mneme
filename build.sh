@@ -30,7 +30,7 @@ case "${1:-app}" in
   test)
     CORE=(Sources/Core/*.swift(N))
     # App files the tests exercise without a running app (only those that exist yet).
-    BRIDGE=(Sources/App/{Paster,Thumbs,Prefs,Hotkey,Shortcuts,StackRelay,ShelfWindow,Chimes,PasteFormatter}.swift(N))
+    BRIDGE=(Sources/App/{Paster,Thumbs,Prefs,Hotkey,Shortcuts,StackRelay,ShelfWindow,Chimes,PasteFormatter,RTFReader}.swift(N))
     swiftc -swift-version 5 -target arm64-apple-macos14.0 -o build/tests $CORE $BRIDGE Tests/*.swift
     ./build/tests "${@:2}"
     ;;

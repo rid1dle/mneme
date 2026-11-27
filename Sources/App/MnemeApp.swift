@@ -185,7 +185,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         globalHotkeys[.pasteNext] = Hotkey(shortcuts[.pasteNext]) { [unowned self] in pasteNext() }
         globalHotkeys[.pastePlainNow] = Hotkey(shortcuts[.pastePlainNow]) { [unowned self] in pasteNow(.plain) }
         globalHotkeys[.pasteOriginalNow] = Hotkey(shortcuts[.pasteOriginalNow]) { [unowned self] in pasteNow(.original) }
-        stackRelay = StackRelay { reps in Paster.write(reps, plainText: false, fallbackText: nil, to: .general) }
+        stackRelay = StackRelay { [formatter] reps in
+            let count = Paster.write(reps, plainText: false, fallbackText: nil, to: .general)
+            formatter?.adoptStackItem(reps, changeCount: count)
+        }
         stackRelay.setActive(false)
         stackTap = StackTap(onCommandV: { [stackRelay, formatter] in
             stackRelay?.commandV()
@@ -239,10 +242,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let ids = stack.items
         storeQueue.async { [store] in
             let reps = ids.map { (try? store?.representations($0)) ?? [] }
+            var sources: [String: SourceApp] = [:]
+            for (id, r) in zip(ids, reps) where !r.isEmpty { if let source = (try? store?.item(id))??.source { sources[contentHash(r)] = source } }
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
                     guard self.stack.items == ids else { return }   // changed again meanwhile; a newer refresh follows
-                    if writeHead, let head = reps.first { self.ownChangeCount = Paster.write(head, plainText: false, fallbackText: nil, to: .general) }
+                    self.formatter.setStackSources(sources)
+                    if writeHead, let head = reps.first {
+                        self.ownChangeCount = Paster.write(head, plainText: false, fallbackText: nil, to: .general)
+                        self.formatter.adoptStackItem(head, changeCount: self.ownChangeCount!)
+                    }
                     self.stackRelay.setUpcoming(Array(reps.dropFirst()))
                 }
             }
@@ -299,6 +308,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
         stackRelay.commandV()
+        formatter.commandV()
         Task { @MainActor in
             let result = await Paster.pressPaste(into: nil, autoPaste: UserDefaults.standard.bool(forKey: Pref.autoPaste))
             if result == .copiedOnly { Toast.show("Copied. Press ⌘V to paste.") }

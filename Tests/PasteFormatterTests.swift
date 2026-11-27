@@ -164,3 +164,72 @@ let pasteFormatterTests: [TestCase] = [
         }
     },
 ]
+
+/// A rich text copy the way TextEdit or Pages writes it: a red title, a bulleted list with a nested item, bold,
+/// italic and a link.
+private func richTextCopy() -> Data {
+    let s = NSMutableAttributedString()
+    let body = NSFont.systemFont(ofSize: 13)
+    s.append(NSAttributedString(string: "Title\n", attributes: [.font: NSFont.boldSystemFont(ofSize: 18), .foregroundColor: NSColor.red]))
+    let outer = NSTextList(markerFormat: .disc, options: 0)
+    let inner = NSTextList(markerFormat: .circle, options: 0)
+    func item(_ marker: String, _ text: NSAttributedString, _ lists: [NSTextList]) {
+        let p = NSMutableParagraphStyle()
+        p.textLists = lists
+        let line = NSMutableAttributedString(string: "\t\(marker)\t", attributes: [.font: body])
+        line.append(text)
+        line.append(NSAttributedString(string: "\n", attributes: [.font: body]))
+        line.addAttribute(.paragraphStyle, value: p, range: NSRange(location: 0, length: line.length))
+        s.append(line)
+    }
+    item("•", NSAttributedString(string: "one", attributes: [.font: NSFontManager.shared.convert(body, toHaveTrait: .italicFontMask)]), [outer])
+    item("◦", NSAttributedString(string: "inner", attributes: [.font: body]), [outer, inner])
+    item("•", NSAttributedString(string: "site", attributes: [.font: body, .link: URL(string: "https://example.com")!]), [outer])
+    s.append(NSAttributedString(string: "End", attributes: [.font: body, .backgroundColor: NSColor.yellow]))
+    return s.rtf(from: NSRange(location: 0, length: s.length), documentAttributes: [:])!
+}
+
+let pasteFormatterGapTests: [TestCase] = [
+    test("should read a rich text copy into clean HTML with its lists, bold, italic and links, and no colours") {
+        let html = htmlFromRichText(richTextCopy(), rtfd: false) ?? ""
+        expectEqual(html, "<p><strong>Title</strong></p><ul><li><em>one</em><ul><li>inner</li></ul></li><li><a href=\"https://example.com\">site</a></li></ul><p>End</p>")
+    },
+    test("should give mail clean formatting and a terminal bullets from a Pages or TextEdit copy") {
+        let r = Rig()
+        r.copy([Representation(type: PasteType.rtf, data: richTextCopy()), Representation(type: PasteType.plain, data: Data("Title\n\tone".utf8))], from: "com.apple.TextEdit")
+        r.press(into: "com.apple.mail")
+        expect(r.string(PasteType.html)?.contains("<ul><li><em>one</em>") == true, r.string(PasteType.html) ?? "")
+        expect(!r.types.contains(PasteType.rtf), "the rich text with its colours is not offered to mail")
+        r.press(into: "com.apple.Terminal")
+        expectEqual(r.string(PasteType.plain), "Title\n\n- one\n  - inner\n- site\n\nEnd")
+        r.press(into: "com.microsoft.Excel")
+        expect(r.types.contains(PasteType.rtf), "a spreadsheet gets the original")
+    },
+    test("should put the clipboard in the right form when an app comes to the front, for Edit > Paste") {
+        let r = Rig()
+        r.copy(rich(), from: "com.microsoft.VSCode")
+        r.formatter.frontMoved(bundle: "com.apple.mail", name: "Mail", pid: 0)
+        expect(r.string(PasteType.html)?.contains("rgb(") == false)
+        r.formatter.frontMoved(bundle: "com.microsoft.VSCode", name: "Code", pid: 0)
+        expectEqual(r.string(PasteType.html), richCopy)
+        r.formatter.settle()
+        expect(!FileManager.default.fileExists(atPath: r.log.path), "switching apps is not a paste: nothing logged")
+    },
+    test("should prepare a new copy for the app already in front once it is ready") {
+        let r = Rig()
+        r.formatter.setFront(bundle: "com.apple.Terminal", name: "Terminal", pid: 0)
+        r.copy(rich(), from: "com.microsoft.VSCode")
+        expectEqual(r.string(PasteType.plain), "Plan:\n\n- one\n- two")
+    },
+    test("should format paste stack items by where they were copied") {
+        let r = Rig()
+        let reps = rich()
+        r.formatter.setStackSources([contentHash(reps): SourceApp(bundleID: "com.microsoft.VSCode", name: "Code")])
+        r.formatter.setFront(bundle: "com.apple.mail", name: "Mail", pid: 0)
+        let count = Paster.write(reps, plainText: false, fallbackText: nil, to: r.pb)
+        r.formatter.adoptStackItem(reps, changeCount: count)
+        expect(r.string(PasteType.html)?.contains("rgb(") == false, "mail gets the stack item clean")
+        r.press(into: "com.microsoft.VSCode")
+        expectEqual(r.string(PasteType.html), richCopy, "back in the app it came from it is the original")
+    },
+]
