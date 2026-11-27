@@ -289,7 +289,7 @@ struct PastingTab: View {
     private static let rules: [(place: String, gets: String)] = [
         ("Excel, Numbers, Google Sheets", "Everything as copied, colours and cell styling included"),
         ("Gmail, Mail, Docs, Notion, Slack and other apps", "Bullets, bold, links, code and tables kept; colours, backgrounds and fonts dropped"),
-        ("Code editors and terminals", "Plain text, lists as - bullets; code exactly as copied"),
+        ("Code editors and terminals", "Markdown: bold, numbered lists and tables kept; code exactly as copied"),
         ("WhatsApp, Telegram, Messages", "Plain text, lists as • bullets"),
         ("The app it was copied from", "Exactly as copied"),
     ]

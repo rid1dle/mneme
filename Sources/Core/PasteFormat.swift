@@ -8,12 +8,16 @@ public enum PasteVersion: String, Codable, CaseIterable, Sendable {
     case clean
     /// Text only, with bullets and indents rebuilt.
     case plain
+    /// Text with the structure written as Markdown (bold, numbered lists, tables), for code editors, terminals and
+    /// the AI chat boxes in them. A copy with no such structure is pasted as it was copied.
+    case markdown
 
     public var name: String {
         switch self {
         case .original: return "Original formatting"
         case .clean: return "Clean formatting"
         case .plain: return "Plain text"
+        case .markdown: return "Markdown"
         }
     }
 }
@@ -22,7 +26,7 @@ public enum PasteVersion: String, Codable, CaseIterable, Sendable {
 public enum PasteTarget: String, Sendable {
     /// Excel, Numbers, Google Sheets: colours and cell styling are part of the content there.
     case spreadsheet
-    /// Code editors and terminals: text only, Markdown-style bullets.
+    /// Code editors and terminals: Markdown.
     case code
     /// Chats that take text only: text with bullet characters.
     case plainChat
@@ -32,7 +36,8 @@ public enum PasteTarget: String, Sendable {
     public var version: PasteVersion {
         switch self {
         case .spreadsheet: return .original
-        case .code, .plainChat: return .plain
+        case .code: return .markdown
+        case .plainChat: return .plain
         case .rich: return .clean
         }
     }
@@ -121,8 +126,16 @@ public enum PasteRules {
     /// The version for a paste: the original back into the app it came from, then what the user taught for this
     /// place, then the rule for the kind of place.
     public static func version(for place: PastePlace, learned: PasteLearning) -> PasteVersion {
-        if let s = place.sourceBundle, s == place.targetBundle, place.site == nil { return .original }
+        if backHome(place) { return .original }
         return learned.version(for: place.learningKey) ?? place.target.version
+    }
+
+    /// Back into the app the copy came from. Not for a code editor or terminal: a copy from its chat or preview
+    /// panel has a list or table that only Markdown keeps, and its own editor copies have none, so they paste as
+    /// copied anyway.
+    static func backHome(_ place: PastePlace) -> Bool {
+        guard let s = place.sourceBundle, s == place.targetBundle, place.site == nil else { return false }
+        return place.target != .code
     }
 }
 
@@ -163,6 +176,8 @@ public struct PasteVersions: Sendable {
     /// Plain text per bullet style.
     public var plainDots: String
     public var plainDashes: String
+    /// Nil when the copy has nothing only Markdown carries; the original is pasted instead.
+    public var markdown: String? = nil
 
     public func representations(_ v: PasteVersion, target: PasteTarget) -> [Representation] {
         switch v {
@@ -171,6 +186,9 @@ public struct PasteVersions: Sendable {
         case .plain:
             let text = target.bullets == .dashes ? plainDashes : plainDots
             return [Representation(index: 0, type: PasteType.plain, data: Data(text.utf8))]
+        case .markdown:
+            guard let markdown else { return original }
+            return [Representation(index: 0, type: PasteType.plain, data: Data(markdown.utf8))]
         }
     }
 }
@@ -194,7 +212,7 @@ public func pasteVersions(_ reps: [Representation], sourceBundle: String?, richT
         let dashes = list || plain == nil ? plainText(fromHTML: html, bullets: .dashes) : plain!
         return PasteVersions(original: reps,
                              clean: [Representation(type: PasteType.html, data: Data(clean.utf8)), Representation(type: PasteType.plain, data: Data(dots.utf8))],
-                             plainDots: dots, plainDashes: dashes)
+                             plainDots: dots, plainDashes: dashes, markdown: markdownText(fromHTML: html))
     }
     if let rich = reps.first(where: { $0.type == PasteType.rtfd }) ?? reps.first(where: { $0.type == PasteType.rtf }) {
         guard rich.data.count <= maxFormattedHTMLBytes, let html = richTextToHTML?(rich.data, rich.type == PasteType.rtfd) else { return nil }
@@ -203,13 +221,13 @@ public func pasteVersions(_ reps: [Representation], sourceBundle: String?, richT
         let dashes = list || plain == nil ? plainText(fromHTML: html, bullets: .dashes) : plain!
         return PasteVersions(original: reps,
                              clean: [Representation(type: PasteType.html, data: Data(html.utf8)), Representation(type: PasteType.plain, data: Data(dots.utf8))],
-                             plainDots: dots, plainDashes: dashes)
+                             plainDots: dots, plainDashes: dashes, markdown: markdownText(fromHTML: html))
     }
     guard let plain, looksLikeMarkdown(plain) else { return nil }
     let html = markdownToHTML(plain)
     return PasteVersions(original: reps,
                          clean: [Representation(type: PasteType.html, data: Data(html.utf8)), Representation(type: PasteType.plain, data: Data(plain.utf8))],
-                         plainDots: plain, plainDashes: plain)
+                         plainDots: plain, plainDashes: plain, markdown: plain)
 }
 
 /// One line of the paste log: no content, only where from, where to, what was given and why.
@@ -232,6 +250,6 @@ public struct PasteLogEntry: Codable, Equatable, Sendable {
 }
 
 public func pasteReason(_ place: PastePlace, learned: PasteLearning) -> String {
-    if let s = place.sourceBundle, s == place.targetBundle, place.site == nil { return "same-app" }
+    if PasteRules.backHome(place) { return "same-app" }
     return learned.version(for: place.learningKey) != nil ? "learned" : "rule"
 }

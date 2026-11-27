@@ -231,25 +231,51 @@ public func cleanHTML(_ html: String) -> String {
 
 // MARK: plain text from HTML
 
-public enum BulletStyle: Sendable { case dots, dashes }
+public enum BulletStyle: Sendable {
+    case dots, dashes
+    /// Markdown: `-` bullets, `**bold**`, `*italic*`, `` `code` ``, links, `#` headings, pipe tables and fenced code.
+    case markdown
+}
 
 /// Plain text that keeps what the HTML's structure said: bullets and indents for lists, numbers for numbered lists,
 /// a blank line between paragraphs, tabs between table cells (so a table still lands in cells), code blocks as they
 /// are. Entities are decoded and the source's line wrapping collapsed.
 public func plainText(fromHTML html: String, bullets: BulletStyle = .dots) -> String {
+    renderText(html, bullets).text
+}
+
+/// Markdown for a code editor, a terminal or an AI chat box, from HTML that has something only Markdown can carry
+/// (a list, heading, table, bold, italic, inline code or link). Nil for anything else, such as a code editor's own
+/// copy, which is pasted as it was copied.
+public func markdownText(fromHTML html: String) -> String? {
+    let r = renderText(cleanHTML(html), .markdown)
+    return r.marked ? r.text : nil
+}
+
+private let inlineMarkers = ["strong": "**", "em": "*", "s": "~~", "code": "`"]
+
+private func renderText(_ html: String, _ bullets: BulletStyle) -> (text: String, marked: Bool) {
+    let md = bullets == .markdown
     var lines: [String] = []
     var line = ""
-    var lists: [(ordered: Bool, next: Int)] = []
+    var lists: [(ordered: Bool, next: Int, width: Int)] = []
     var pre = 0
     var pendingBlank = false
     var cellInRow = 0
+    var inCell = false
+    var tableRows = 0
     var pendingSpace = false
+    // Markdown only: opening markers held until the text they wrap arrives, so "<strong> x</strong>" is " **x**".
+    var pendingOpen = ""
+    var links: [String] = []
+    var marked = false
 
     func endLine() {
         let trimmed = pre > 0 ? line : String(line.reversed().drop(while: { $0 == " " }).reversed())
         if !trimmed.isEmpty || pre > 0 { lines.append(trimmed) }
         line = ""
         pendingSpace = false
+        pendingOpen = ""
     }
     func block() {
         if !line.isEmpty { endLine() }
@@ -259,19 +285,23 @@ public func plainText(fromHTML html: String, bullets: BulletStyle = .dots) -> St
     func bullet(depth: Int) -> String {
         switch bullets {
         case .dots: return ["•", "◦", "▪"][min(depth, 2)]
-        case .dashes: return "-"
+        case .dashes, .markdown: return "-"
         }
     }
     func append(_ s: String) {
         if pendingSpace, !line.isEmpty, line.last != " ", line.last != "\t" { line += " " }
         pendingSpace = false
-        line += s
+        line += pendingOpen + s
+        pendingOpen = ""
+    }
+    func close(_ marker: String) {
+        if pendingOpen.hasSuffix(marker) { pendingOpen.removeLast(marker.count) } else { line += marker; marked = true }
     }
 
     for token in htmlTokens(html) {
         switch token {
         case .text(let raw):
-            let t = decodeEntities(raw)
+            var t = decodeEntities(raw)
             if pre > 0 {
                 let parts = t.split(separator: "\n", omittingEmptySubsequences: false)
                 for (k, p) in parts.enumerated() {
@@ -280,6 +310,7 @@ public func plainText(fromHTML html: String, bullets: BulletStyle = .dots) -> St
                 }
                 continue
             }
+            if md, inCell { t = t.replacingOccurrences(of: "|", with: "\\|") }
             var words = t.split(whereSeparator: { $0 == " " || $0 == "\n" || $0 == "\t" || $0 == "\r" || $0 == "\u{a0}" })
             if words.isEmpty { if !t.isEmpty { pendingSpace = true }; continue }
             if let f = t.first, f == " " || f == "\n" || f == "\t" || f == "\u{a0}" { pendingSpace = true }
@@ -288,39 +319,80 @@ public func plainText(fromHTML html: String, bullets: BulletStyle = .dots) -> St
             for w in words { line += " " + w }
             if let l = t.last, l == " " || l == "\n" || l == "\t" || l == "\u{a0}" { pendingSpace = true }
         case .start(let name, let attrs, _):
+            if md, pre == 0, let m = inlineMarkers[name] { pendingOpen += m; continue }
+            if md, pre == 0, name == "a" {
+                let href = attrs["href"] ?? ""
+                let linkable = ["http", "https", "mailto"].contains(URL(string: href)?.scheme?.lowercased() ?? "")
+                links.append(linkable ? href : "")
+                if linkable { pendingOpen += "[" }
+                continue
+            }
+            if inCell, pre == 0, ["br", "p", "div", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "ul", "ol", "li"].contains(name) {
+                pendingSpace = true
+                continue
+            }
             switch name {
             case "br": if pre > 0 { lines.append(line); line = "" } else { endLine() }
             case "p", "div", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "table", "hr":
                 if pre > 0 { if !line.isEmpty { lines.append(line); line = "" }; continue }
                 block()
+                if name == "table" { tableRows = 0 }
+                guard md else { continue }
+                if name == "hr" { lines.append("---"); marked = true }
+                if name.count == 2, name.first == "h", let n = Int(name.dropFirst()) {
+                    line = String(repeating: "#", count: n) + " "
+                    marked = true
+                }
             case "pre":
                 block()
+                if md, pre == 0 { lines.append("```") }
                 pre += 1
             case "ul", "ol":
                 if pre > 0 { continue }
                 if lists.isEmpty { block() } else if !line.isEmpty { endLine() }
-                lists.append((name == "ol", Int(attrs["start"] ?? "") ?? 1))
+                lists.append((name == "ol", Int(attrs["start"] ?? "") ?? 1, 0))
             case "li":
                 if !line.isEmpty { endLine() }
                 let depth = max(lists.count - 1, 0)
-                let indent = String(repeating: bullets == .dots ? "    " : "  ", count: depth)
+                let indent = md ? String(repeating: " ", count: lists.dropLast().reduce(0) { $0 + $1.width })
+                                : String(repeating: bullets == .dots ? "    " : "  ", count: depth)
                 if var top = lists.popLast() {
-                    line = indent + (top.ordered ? "\(top.next). " : bullet(depth: depth) + " ")
+                    let marker = top.ordered ? "\(top.next). " : bullet(depth: depth) + " "
+                    line = indent + marker
                     top.next += 1
+                    top.width = marker.count
                     lists.append(top)
                 } else {
                     line = bullet(depth: 0) + " "
                 }
+                if md { marked = true }
             case "tr":
                 if !line.isEmpty { endLine() }
                 cellInRow = 0
             case "td", "th":
-                if cellInRow > 0 { line += "\t" }
+                if md { line += cellInRow == 0 ? "| " : " | " } else if cellInRow > 0 { line += "\t" }
                 cellInRow += 1
+                inCell = true
                 pendingSpace = false
             default: break
             }
         case .end(let name):
+            if md, pre == 0, let m = inlineMarkers[name] { close(m); continue }
+            if md, pre == 0, name == "a" {
+                guard let href = links.popLast(), !href.isEmpty else { continue }
+                if pendingOpen.hasSuffix("[") { pendingOpen.removeLast(); continue }
+                if let open = line.range(of: "[", options: .backwards), line[open.upperBound...] == href {
+                    line.remove(at: open.lowerBound)
+                } else {
+                    line += "](\(href))"
+                }
+                marked = true
+                continue
+            }
+            if inCell, !["td", "th", "tr", "table"].contains(name) {
+                if pre == 0, ["p", "div", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "ul", "ol", "li"].contains(name) { pendingSpace = true }
+                continue
+            }
             switch name {
             case "p", "div", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "table", "hr":
                 if pre > 0 { continue }
@@ -329,14 +401,31 @@ public func plainText(fromHTML html: String, bullets: BulletStyle = .dots) -> St
             case "pre":
                 if pre > 0 {
                     pre -= 1
-                    if pre == 0 { if !line.isEmpty { lines.append(line) }; line = ""; pendingBlank = true }
+                    if pre == 0 {
+                        if !line.isEmpty { lines.append(line) }
+                        line = ""
+                        if md { lines.append("```") }
+                        pendingBlank = true
+                    }
                 }
             case "ul", "ol":
                 if pre > 0 { continue }
                 if !line.isEmpty { endLine() }
                 _ = lists.popLast()
                 if lists.isEmpty { pendingBlank = true }
+            case "td", "th":
+                inCell = false
             case "li", "tr":
+                if name == "tr", md, cellInRow > 0 {
+                    line += " |"
+                    endLine()
+                    if tableRows == 0 { lines.append("|" + String(repeating: " --- |", count: cellInRow)) }
+                    tableRows += 1
+                    marked = true
+                    inCell = false
+                    continue
+                }
+                inCell = false
                 if !line.isEmpty { endLine() }
             default: break
             }
@@ -345,7 +434,7 @@ public func plainText(fromHTML html: String, bullets: BulletStyle = .dots) -> St
     if !line.isEmpty { endLine() }
     while lines.last?.isEmpty == true { lines.removeLast() }
     while lines.first?.isEmpty == true { lines.removeFirst() }
-    return lines.joined(separator: "\n")
+    return (lines.joined(separator: "\n"), marked)
 }
 
 /// True when the HTML has a list, the one thing a source's own plain text usually loses.

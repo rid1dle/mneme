@@ -19,8 +19,8 @@ shortcut changeable. About 22 MB of memory when idle.
 - **Formatting that suits where you paste:** when an app comes to the front, on ⌘V, and on pastes from the shelf or
   the paste stack, a text copy is put in the form for the app, or the site in a browser, in front (so Edit > Paste
   and a right click get it too): spreadsheets get it as copied, mail, documents and chat apps get its
-  structure without the source's colours and fonts, code editors and terminals get plain text with `- ` bullets, and
-  plain-text chats get `•` bullets. Markdown-looking plain text, and rich text from Word, Pages, TextEdit or Notes,
+  structure without the source's colours and fonts, code editors and terminals (and the AI chat boxes in
+  them) get Markdown, with bold, numbered lists and tables written out, and plain-text chats get `•` bullets. Markdown-looking plain text, and rich text from Word, Pages, TextEdit or Notes,
   becomes clean formatted text where formatting is taken.
   ⌥⇧⌘V pastes plain text and ⌃⌥⌘V the original anywhere (⇧↩ and ⌥↩ in the shelf); choosing the same way twice for
   one place makes it the rule there. Settings → Pasting; a content-free log of pastes is kept in `paste-log.jsonl`.
