@@ -117,21 +117,6 @@ struct Shortcuts: Equatable {
     }
 }
 
-func carbonModifiers(_ flags: NSEvent.ModifierFlags) -> UInt32 {
-    var m = 0
-    if flags.contains(.command) { m |= cmdKey }
-    if flags.contains(.shift) { m |= shiftKey }
-    if flags.contains(.option) { m |= optionKey }
-    if flags.contains(.control) { m |= controlKey }
-    return UInt32(m)
-}
-
-extension KeyCombo {
-    init(event: NSEvent) {
-        self.init(keyCode: UInt32(event.keyCode), modifiers: carbonModifiers(event.modifierFlags))
-    }
-}
-
 /// While the search field has text, the keys that edit text are the field's, not the shelf's: every ⌫ and
 /// forward-delete variant, ⌘A/C/X/V/Z, and arrows with a modifier (word and line moves).
 func searchFieldOwns(_ c: KeyCombo, searchEmpty: Bool) -> Bool {

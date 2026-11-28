@@ -26,7 +26,7 @@ case "${1:-app}" in
     bundle build/Spike.app Spike local.mneme.spike build/Spike-Info.plist Sources/Spike/*.swift
     ;;
   app)
-    bundle build/Mneme.app Mneme local.mneme Resources/Info.plist $KIT Sources/Core/*.swift Sources/App/*.swift
+    bundle build/Mneme.app Mneme local.mneme Resources/Info.plist $KIT ${KIT_UI:|KIT} Sources/Core/*.swift Sources/App/*.swift
     ;;
   install)
     "$0" app

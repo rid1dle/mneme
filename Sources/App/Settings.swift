@@ -1,5 +1,4 @@
 import AppKit
-import ServiceManagement
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -11,7 +10,7 @@ final class SettingsModel: ObservableObject {
     @Published var pinboards: [Pinboard] = []
     @Published var accessibility = AXIsProcessTrusted()
     @Published var clipboardAllowed = Watcher.accessAllowed()
-    @Published var openAtLogin = SMAppService.mainApp.status == .enabled
+    @Published var openAtLogin = LoginItem.isOn
     @Published var excluded: [String]
     @AppStorage(Pref.historyDays) var historyDays = 30
     @AppStorage(Pref.autoPaste) var autoPaste = true
@@ -53,7 +52,7 @@ final class SettingsModel: ObservableObject {
     func refreshPermissions() {
         accessibility = AXIsProcessTrusted()
         clipboardAllowed = Watcher.accessAllowed()
-        openAtLogin = SMAppService.mainApp.status == .enabled
+        openAtLogin = LoginItem.isOn
         app?.updatePasteTap()
     }
 
@@ -74,8 +73,8 @@ final class SettingsModel: ObservableObject {
     // MARK: general
 
     func setOpenAtLogin(_ on: Bool) {
-        do { if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() } } catch {}
-        openAtLogin = SMAppService.mainApp.status == .enabled
+        LoginItem.set(on)
+        openAtLogin = LoginItem.isOn
     }
 
     var kinds: Set<ItemKind> {
@@ -171,28 +170,6 @@ struct SettingsView: View {
     }
 }
 
-private struct StatusRow: View {
-    let title: String
-    let ok: Bool
-    let okText: String
-    let fixText: String
-    let detail: String
-    let fix: () -> Void
-
-    var body: some View {
-        HStack(alignment: .top) {
-            Image(systemName: ok ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
-                .foregroundStyle(ok ? .green : .orange).font(.system(size: 15))
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.system(size: 13, weight: .medium))
-                Text(ok ? okText : detail).font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer()
-            if !ok { Button(fixText, action: fix) }
-        }
-    }
-}
-
 struct GeneralTab: View {
     @ObservedObject var settings: SettingsModel
 
@@ -208,15 +185,16 @@ struct GeneralTab: View {
                 Toggle("Paste into the app I was in (not only copy)", isOn: $settings.autoPaste)
             }
             Section("Permissions") {
-                StatusRow(title: "Clipboard access", ok: settings.clipboardAllowed, okText: "Mneme can save what you copy.",
-                          fixText: "Open Settings", detail: "Set Mneme to Always Allow in Paste from Other Apps, or nothing is saved.") {
+                StatusRow("Clipboard access", detail: "Set Mneme to Always Allow in Paste from Other Apps, or nothing is saved.",
+                          grantedDetail: "Mneme can save what you copy.", granted: settings.clipboardAllowed, actionTitle: "Open Settings") {
                     NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Pasteboard")!)
                 }
-                StatusRow(title: "Accessibility", ok: settings.accessibility, okText: "Mneme can press ⌘V for you and run the paste stack.",
-                          fixText: "Open Settings", detail: "Needed to paste for you and for ⌘V in the paste stack. Without it, items are copied and you press ⌘V.") {
+                StatusRow("Accessibility", detail: "Needed to paste for you and for ⌘V in the paste stack. Without it, items are copied and you press ⌘V.",
+                          grantedDetail: "Mneme can press ⌘V for you and run the paste stack.", granted: settings.accessibility, actionTitle: "Open Settings") {
                     NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
                 }
             }
+            .statusRowStyle(.iconLeading)
             if let updater = settings.app?.updater { UpdatesSection(updater: updater) }
         }
         .formStyle(.grouped)

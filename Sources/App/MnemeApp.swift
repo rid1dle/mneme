@@ -1,6 +1,5 @@
 import AppKit
 import Carbon.HIToolbox
-import ServiceManagement
 import SwiftUI
 
 /// Launch options used for testing (flags without a value go last):
@@ -602,9 +601,8 @@ struct MnemeMain {
         // Maintenance: `--login-item on|off` sets whether this copy of Mneme opens at login, then quits.
         if CommandLine.arguments.dropFirst().first == "--login-item" {
             let on = CommandLine.arguments.dropFirst(2).first == "on"
-            do { if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() } }
-            catch { FileHandle.standardError.write("login item: \(error)\n".data(using: .utf8)!) }
-            print("open at login for \(Bundle.main.bundlePath): \(SMAppService.mainApp.status == .enabled)")
+            if let error = LoginItem.set(on) { FileHandle.standardError.write("login item: \(error)\n".data(using: .utf8)!) }
+            print("open at login for \(Bundle.main.bundlePath): \(LoginItem.isOn)")
             exit(0)
         }
         let app = NSApplication.shared
