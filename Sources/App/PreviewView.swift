@@ -70,7 +70,7 @@ struct PreviewView: View {
     private var side: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(item.title ?? item.source?.name ?? "Item").font(.system(size: 15, weight: .semibold)).lineLimit(2)
-            Text("\(footerText(item)) · \(relativeTimeLong(item.lastUsedAt))").font(.system(size: 11)).foregroundStyle(.secondary)
+            Text("\(footerText(item)) · \(relativeTimeLong(item.lastUsedAt))").note()
             Spacer(minLength: 6)
             if model.editing {
                 Button { if let t = editor.current() { model.saveText(item, t) } } label: { Label("Save", systemImage: "checkmark") .frame(maxWidth: .infinity) }
@@ -158,7 +158,7 @@ struct OverlaySheet: View {
                 TextField("Title", text: $text).textFieldStyle(.roundedBorder).focused($focused)
                     .onSubmit { model.rename(item, to: text) }
                     .onAppear { text = item.title ?? ""; focused = true }
-                Text("Leave empty to remove the title.").font(.system(size: 11)).foregroundStyle(.secondary)
+                Text("Leave empty to remove the title.").note()
                 buttons("Rename") { model.rename(item, to: text) }
             case .newPinboard(let item):
                 Text("New Pinboard").font(.system(size: 14, weight: .semibold))

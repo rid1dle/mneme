@@ -373,13 +373,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func openSettings(tab: String = "general") {
         if settingsWindow == nil {
-            let view = SettingsView(settings: settingsModel, tab: tab).environmentObject(theme)
-            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 620, height: 560), styleMask: [.titled, .closable], backing: .buffered, defer: false)
-            w.title = "Mneme Settings"
-            w.isReleasedWhenClosed = false
-            w.contentView = NSHostingView(rootView: view)
-            w.center()
-            settingsWindow = w
+            settingsWindow = SettingsPages.window(settingsModel, theme: theme, tab: tab)
         }
         settingsModel.refreshPermissions()
         settingsModel.reloadPinboards()

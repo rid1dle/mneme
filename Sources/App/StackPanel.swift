@@ -42,7 +42,7 @@ struct StackPanelView: View {
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
                 Text(model.pressesForYou ? "⌘V pastes the top one, then the next. Drag to reorder." : "Allow Accessibility so ⌘V pastes them in order.")
-                    .font(.system(size: 11)).foregroundStyle(.secondary)
+                    .note()
                     .padding(.horizontal, 12).padding(.vertical, 8)
             }
         }

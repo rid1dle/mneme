@@ -136,7 +136,7 @@ struct CardView: View, Equatable {
                 if let title = item.linkTitle {
                     Text(title).font(.system(size: 12, weight: .semibold)).lineLimit(3)
                 }
-                Text(item.preview).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(4)
+                Text(item.preview).note().lineLimit(4)
             }
             .padding(10)
     }

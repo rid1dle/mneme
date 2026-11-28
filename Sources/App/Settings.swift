@@ -119,54 +119,43 @@ final class SettingsModel: ObservableObject {
     }
 }
 
-struct SettingsView: View {
-    @ObservedObject var settings: SettingsModel
-    @EnvironmentObject var theme: ThemeStore
-    @State var tab: String
-
-    private static let tabs: [(id: String, name: String, icon: String)] = [
+/// Mneme's Settings pages, in the polycurio Settings window (org/0003): a toolbar of pages, every page one size.
+enum SettingsPages {
+    static let tabs: [(id: String, name: String, icon: String)] = [
         ("general", "General", "gearshape"), ("shortcuts", "Shortcuts", "command"), ("history", "History", "clock"),
         ("pasting", "Pasting", "doc.on.clipboard"), ("sound", "Sound", "speaker.wave.2"), ("privacy", "Privacy", "hand.raised"), ("appearance", "Appearance", "paintpalette"), ("pinboards", "Pinboards", "pin"),
     ]
+    static let size = CGSize(width: 620, height: 500)
+
+    @MainActor
+    static func window(_ settings: SettingsModel, theme: ThemeStore, tab: String) -> NSWindow {
+        func page<V: View>(_ v: V) -> some View { MnemePage(settings: settings) { v }.environmentObject(theme) }
+        let pages = tabs.map { t -> SettingsPage in
+            switch t.id {
+            case "shortcuts": return SettingsPage(t.name, t.icon, page(ShortcutsTab(settings: settings)))
+            case "history": return SettingsPage(t.name, t.icon, page(HistoryTab(settings: settings)))
+            case "sound": return SettingsPage(t.name, t.icon, page(SoundTab(settings: settings)))
+            case "pasting": return SettingsPage(t.name, t.icon, page(PastingTab(settings: settings)))
+            case "privacy": return SettingsPage(t.name, t.icon, page(PrivacyTab(settings: settings)))
+            case "appearance": return SettingsPage(t.name, t.icon, page(AppearanceTab()))
+            case "pinboards": return SettingsPage(t.name, t.icon, page(PinboardsTab(settings: settings)))
+            default: return SettingsPage(t.name, t.icon, page(GeneralTab(settings: settings)))
+            }
+        }
+        return makeSettingsWindow(title: "Mneme Settings", pages: pages, size: size, selected: tabs.firstIndex { $0.id == tab } ?? 0)
+    }
+}
+
+/// What every Mneme Settings page shares: the theme's accent, and permissions read again when the window comes back.
+private struct MnemePage<Content: View>: View {
+    @ObservedObject var settings: SettingsModel
+    @EnvironmentObject var theme: ThemeStore
+    @ViewBuilder let content: () -> Content
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 2) {
-                ForEach(Self.tabs, id: \.id) { t in
-                    Button { tab = t.id } label: {
-                        VStack(spacing: 3) {
-                            Image(systemName: t.icon).font(.system(size: 17)).frame(height: 20)
-                            Text(t.name).font(.system(size: 11))
-                        }
-                        .frame(width: 72, height: 48)
-                        .foregroundStyle(tab == t.id ? theme.accent : Color.secondary)
-                        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(tab == t.id ? Color.primary.opacity(0.08) : .clear))
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(t.name)
-                    .accessibilityAddTraits(tab == t.id ? .isSelected : [])
-                }
-            }
-            .padding(.vertical, 8)
-            Divider()
-            Group {
-                switch tab {
-                case "shortcuts": ShortcutsTab(settings: settings)
-                case "history": HistoryTab(settings: settings)
-                case "sound": SoundTab(settings: settings)
-                case "pasting": PastingTab(settings: settings)
-                case "privacy": PrivacyTab(settings: settings)
-                case "appearance": AppearanceTab()
-                case "pinboards": PinboardsTab(settings: settings)
-                default: GeneralTab(settings: settings)
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
-        .frame(width: 620, height: 560)
-        .tint(theme.accent)
-        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in settings.refreshPermissions() }
+        content()
+            .tint(theme.accent)
+            .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in settings.refreshPermissions() }
     }
 }
 
@@ -180,7 +169,7 @@ struct GeneralTab: View {
                 Toggle("Show Mneme in the menu bar", isOn: $settings.showMenuBar)
                     .onChange(of: settings.showMenuBar) { settings.app?.applyMenuBar() }
                 if !settings.showMenuBar {
-                    Text("To get back here, open Mneme again from Applications, or use the gear in the shelf.").font(.system(size: 11)).foregroundStyle(.secondary)
+                    Text("To get back here, open Mneme again from Applications, or use the gear in the shelf.").note()
                 }
                 Toggle("Paste into the app I was in (not only copy)", isOn: $settings.autoPaste)
             }
@@ -194,7 +183,6 @@ struct GeneralTab: View {
                     NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
                 }
             }
-            .statusRowStyle(.iconLeading)
             if let updater = settings.app?.updater { UpdatesSection(updater: updater) }
         }
         .formStyle(.grouped)
@@ -212,7 +200,7 @@ struct ShortcutsTab: View {
             Section("In the shelf") {
                 ForEach(ShortcutAction.allCases.filter { !$0.isGlobal }, id: \.self) { row($0) }
                 Text("Fixed: ← → move, Return pastes, ⌘1 to ⌘9 paste one of the first nine, Esc closes. Shortcuts without ⌘, ⌃ or ⌥ type into the search while it has text.")
-                    .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    .note().fixedSize(horizontal: false, vertical: true)
             }
         }
         .formStyle(.grouped)
@@ -225,7 +213,7 @@ struct ShortcutsTab: View {
                 Spacer()
                 HotkeyRecorder(action: a, settings: settings)
             }
-            if let note = a.note { Text(note).font(.system(size: 11)).foregroundStyle(.secondary) }
+            if let note = a.note { Text(note).note() }
             if let p = settings.problems[a] { Text(p).font(.system(size: 11, weight: .medium)).foregroundStyle(.red) }
         }
     }
@@ -243,7 +231,7 @@ struct HistoryTab: View {
                 Picker("Keep history for", selection: $settings.historyDays) {
                     ForEach(ages, id: \.1) { Text($0.0).tag($0.1) }
                 }
-                Text("Pinboards are kept forever, whatever this says.").font(.system(size: 11)).foregroundStyle(.secondary)
+                Text("Pinboards are kept forever, whatever this says.").note()
             }
             Section("Save") {
                 ForEach(kindNames, id: \.0) { kind, name in
@@ -283,28 +271,28 @@ struct PastingTab: View {
                 Text(settings.accessibility
                      ? "Text you copy is pasted in the form that suits the app, or the site in a browser, it goes into: with ⌘V, Edit > Paste, a right click or the paste stack. Plain text written as Markdown, and rich text from Word, Pages or Notes, become clean formatted text in apps that take formatting."
                      : "Accessibility is off, so this works only when you switch apps and not on ⌘V inside a browser: allow it in General.")
-                    .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    .note().fixedSize(horizontal: false, vertical: true)
             }
             Section("What each place gets") {
                 ForEach(Self.rules, id: \.place) { r in
                     VStack(alignment: .leading, spacing: 2) {
                         Text(r.place).font(.system(size: 12, weight: .medium))
-                        Text(r.gets).font(.system(size: 11)).foregroundStyle(.secondary)
+                        Text(r.gets).note()
                     }
                 }
                 Text("Any other way, any time: \(settings.shortcuts[.pastePlainNow]?.display ?? "the plain text shortcut") pastes plain text and \(settings.shortcuts[.pasteOriginalNow]?.display ?? "the original shortcut") the original. In the shelf, ⇧↩ and ⌥↩ do the same.")
-                    .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    .note().fixedSize(horizontal: false, vertical: true)
             }
             Section("Learned from you") {
                 if settings.learned.isEmpty {
                     Text("Nothing yet. Choose plain text or the original the same way twice in one place, and Mneme does it that way there from then on.")
-                        .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        .note().fixedSize(horizontal: false, vertical: true)
                 } else {
                     ForEach(settings.learned, id: \.key) { rule in
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(rule.name).font(.system(size: 12))
-                                Text(rule.version.name).font(.system(size: 11)).foregroundStyle(.secondary)
+                                Text(rule.version.name).note()
                             }
                             Spacer()
                             Button { settings.forget(rule.key) } label: { Image(systemName: "minus.circle") }
@@ -317,7 +305,7 @@ struct PastingTab: View {
                 }
                 Button("Show Paste Log") { settings.showPasteLog() }
                 Text("Where each paste went and the form it got, never what was in it, kept on this Mac to improve these rules.")
-                    .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    .note().fixedSize(horizontal: false, vertical: true)
             }
         }
         .formStyle(.grouped)
@@ -354,7 +342,7 @@ struct SoundTab: View {
                 Text(settings.soundSteady
                      ? "Turning your Mac up or down does not change these sounds. They only get quieter when the Mac is set below them, and they are silent when the Mac is muted."
                      : "These sounds get louder and quieter with your Mac's volume, like other sounds.")
-                    .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    .note().fixedSize(horizontal: false, vertical: true)
             }
             .disabled(!settings.soundOnCopy && !settings.soundOnPaste)
         }
@@ -417,7 +405,7 @@ struct PrivacyTab: View {
             }
             Section {
                 Toggle("Show page titles and images for copied links", isOn: $settings.linkPreviews)
-                Text("Mneme reads only the start of the page. This is its only use of the network.").font(.system(size: 11)).foregroundStyle(.secondary)
+                Text("Mneme reads only the start of the page. This is its only use of the network.").note()
             }
         }
         .formStyle(.grouped)
@@ -505,7 +493,7 @@ private struct MotionChoices: View {
                     .accessibilityAddTraits(chosen == m ? .isSelected : [])
                 }
             }
-            Text((hovered ?? chosen).detail).font(.system(size: 11)).foregroundStyle(.secondary)
+            Text((hovered ?? chosen).detail).note()
         }
     }
 }
